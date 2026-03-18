@@ -5,6 +5,7 @@ import { motion } from "framer-motion"
 import { FileText, Trash2, Upload, X } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { toast } from "sonner"
+import { detectType } from "@/lib/firebase"
 
 type DocType = "SOP" | "LEAVE_POLICY" | "LEAVE_CALENDAR" | "OTHER"
 
@@ -20,11 +21,11 @@ type CompanyDoc = {
   created_at: string
 }
 
-async function uploadPdfToFirebase(file: File, orgId: string) {
+async function uploadDocToFirebase(file: File, orgId: string) {
   const fd = new FormData()
   fd.append("file", file)
   fd.append("orgId", orgId)
-  fd.append("fileType", "PDF")
+  fd.append("fileType", detectType(file.type || "", file.name))
 
   const res = await fetch("/api/upload/lesson-file", {
     method: "POST",
@@ -87,7 +88,7 @@ export default function CompanyDocsAdminPage() {
       return
     }
     if (!file) {
-      toast.error("Please select a PDF file.")
+      toast.error("Please select a document file (PDF/DOCX/PPT).")
       return
     }
     if (!title.trim()) {
@@ -98,7 +99,7 @@ export default function CompanyDocsAdminPage() {
     try {
       setUploading(true)
 
-      const { url, path } = await uploadPdfToFirebase(file, user.orgId)
+      const { url, path } = await uploadDocToFirebase(file, user.orgId)
 
       const res = await fetch("/api/company-docs", {
         method: "POST",
@@ -110,7 +111,7 @@ export default function CompanyDocsAdminPage() {
           description: description.trim() ? description.trim() : null,
           fileUrl: url,
           firebasePath: path,
-          mimeType: file.type || "application/pdf",
+          mimeType: file.type || null,
           userId: user.id,
         }),
       })
@@ -196,7 +197,7 @@ export default function CompanyDocsAdminPage() {
         transition={{ duration: 0.35 }}
       >
         <h1 className="text-3xl font-bold text-[#1C1917]">Company Documents</h1>
-        <p className="text-[#78716C] mt-1">Upload SOP / Leave Policy / Leave Calendar PDFs</p>
+        <p className="text-[#78716C] mt-1">Upload SOP / Leave Policy / Leave Calendar (PDF/DOCX/PPT)</p>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -238,11 +239,11 @@ export default function CompanyDocsAdminPage() {
             </div>
 
             <div>
-              <label className="text-sm font-medium text-[#1C1917] block mb-2">PDF File</label>
+              <label className="text-sm font-medium text-[#1C1917] block mb-2">Document File</label>
               <div className="flex items-center gap-3">
                 <input
                   type="file"
-                  accept="application/pdf"
+                  accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,application/msword,.doc,application/vnd.ms-powerpoint,.ppt,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx"
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                   className="flex-1"
                 />

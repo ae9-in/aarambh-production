@@ -38,6 +38,13 @@ export default function CompanyDocViewer({ params }: { params: Promise<{ id: str
     return doc.doc_type.replaceAll("_", " ")
   }, [doc])
 
+  const isPdf = useMemo(() => {
+    if (!doc) return false
+    const mime = (doc.mime_type || "").toLowerCase()
+    const url = (doc.file_url || "").toLowerCase()
+    return mime.includes("pdf") || url.endsWith(".pdf") || url.includes(".pdf?")
+  }, [doc])
+
   useEffect(() => {
     if (!docId || !user?.orgId || !user?.id) return
 
@@ -110,7 +117,7 @@ export default function CompanyDocViewer({ params }: { params: Promise<{ id: str
 
         <div className="bg-white rounded-2xl border border-[#F0EDE8] overflow-hidden">
           <div className="p-4 border-b border-[#F0EDE8] flex items-center justify-between gap-3">
-            <p className="text-sm text-[#78716C]">PDF Viewer</p>
+            <p className="text-sm text-[#78716C]">{isPdf ? "PDF Viewer" : "Document Viewer"}</p>
             <a
               href={doc.file_url}
               target="_blank"
@@ -120,14 +127,22 @@ export default function CompanyDocViewer({ params }: { params: Promise<{ id: str
               Open in new tab <ExternalLink size={16} />
             </a>
           </div>
-          <div className="w-full" style={{ height: "calc(100vh - 220px)" }}>
-            {/* Chrome-like PDF experience via the browser's built-in viewer */}
-            <iframe
-              src={`${doc.file_url}#toolbar=1`}
-              className="w-full h-full border-0"
-              title={doc.title}
-            />
-          </div>
+          {isPdf ? (
+            <div className="w-full" style={{ height: "calc(100vh - 220px)" }}>
+              {/* Chrome-like PDF experience via the browser's built-in viewer */}
+              <iframe
+                src={`${doc.file_url}#toolbar=1`}
+                className="w-full h-full border-0"
+                title={doc.title}
+              />
+            </div>
+          ) : (
+            <div className="p-6">
+              <p className="text-sm text-[#78716C]">
+                Preview is available only for PDFs. Please open in a new tab to view this file.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

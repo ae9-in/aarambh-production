@@ -12,7 +12,6 @@ import {
   Sparkles,
   LogOut,
   FileText,
-  CalendarDays,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { LearnSearch } from "@/components/learn-search"
@@ -21,9 +20,6 @@ const sidebarNav = [
   { name: "Home", href: "/learn", icon: Home },
   { name: "Categories", href: "/learn/categories", icon: Grid3X3 },
   { name: "Browse", href: "/learn/browse", icon: Grid3X3 },
-  { name: "Company SOP", href: "/learn/company-docs?docType=SOP", icon: FileText },
-  { name: "Leave Policy", href: "/learn/company-docs?docType=LEAVE_POLICY", icon: FileText },
-  { name: "Leave Calendar", href: "/learn/company-docs?docType=LEAVE_CALENDAR", icon: CalendarDays },
   { name: "Company Documents", href: "/learn/company-docs", icon: FileText },
   { name: "AI Search", href: "/learn/ai-chat", icon: Sparkles },
   { name: "Analytics", href: "/learn/analytics", icon: BarChart3 },
@@ -36,9 +32,6 @@ const mobileNav = [
   { name: "Home", href: "/learn", icon: Home },
   { name: "Categories", href: "/learn/categories", icon: Grid3X3 },
   { name: "Browse", href: "/learn/browse", icon: Grid3X3 },
-  { name: "Company SOP", href: "/learn/company-docs?docType=SOP", icon: FileText },
-  { name: "Leave Policy", href: "/learn/company-docs?docType=LEAVE_POLICY", icon: FileText },
-  { name: "Leave Calendar", href: "/learn/company-docs?docType=LEAVE_CALENDAR", icon: CalendarDays },
   { name: "Company Docs", href: "/learn/company-docs", icon: FileText },
   { name: "AI Search", href: "/learn/ai-chat", icon: Sparkles },
   { name: "Profile", href: "/learn/profile", icon: User },
