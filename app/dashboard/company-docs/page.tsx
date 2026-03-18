@@ -34,7 +34,16 @@ async function uploadDocToFirebase(file: File, orgId: string) {
 
   if (!res.ok) {
     const data = await res.json().catch(() => null)
-    throw new Error(data?.error || "File upload failed")
+    const err = data?.error
+    const message =
+      typeof err === "string"
+        ? err
+        : err?.message
+          ? String(err.message)
+          : err
+            ? JSON.stringify(err)
+            : "File upload failed"
+    throw new Error(message)
   }
 
   return (await res.json()) as { url: string; path: string; size: number }
