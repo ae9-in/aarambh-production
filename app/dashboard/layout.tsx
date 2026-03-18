@@ -14,6 +14,7 @@ import {
   Sparkles,
   Settings,
   BarChart3,
+  FileText,
   ChevronDown,
   Search,
   Bell,
@@ -189,6 +190,7 @@ export default function DashboardLayout({
                       { name: "Categories", href: "/dashboard/categories", icon: LayoutGrid },
                       { name: "Lessons", href: "/dashboard/lessons", icon: Play },
                       { name: "File Library", href: "/dashboard/files", icon: FolderOpen },
+                      { name: "Policies", href: "/dashboard/company-docs", icon: FileText },
                     ].map((item) => {
                       const isActive = pathname === item.href
                       return (

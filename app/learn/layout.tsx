@@ -11,6 +11,8 @@ import {
   Trophy,
   Sparkles,
   LogOut,
+  FileText,
+  CalendarDays,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { LearnSearch } from "@/components/learn-search"
@@ -19,6 +21,10 @@ const sidebarNav = [
   { name: "Home", href: "/learn", icon: Home },
   { name: "Categories", href: "/learn/categories", icon: Grid3X3 },
   { name: "Browse", href: "/learn/browse", icon: Grid3X3 },
+  { name: "Company SOP", href: "/learn/company-docs?docType=SOP", icon: FileText },
+  { name: "Leave Policy", href: "/learn/company-docs?docType=LEAVE_POLICY", icon: FileText },
+  { name: "Leave Calendar", href: "/learn/company-docs?docType=LEAVE_CALENDAR", icon: CalendarDays },
+  { name: "Company Documents", href: "/learn/company-docs", icon: FileText },
   { name: "AI Search", href: "/learn/ai-chat", icon: Sparkles },
   { name: "Analytics", href: "/learn/analytics", icon: BarChart3 },
   { name: "Progress", href: "/learn/progress", icon: BarChart3 },
@@ -30,8 +36,11 @@ const mobileNav = [
   { name: "Home", href: "/learn", icon: Home },
   { name: "Categories", href: "/learn/categories", icon: Grid3X3 },
   { name: "Browse", href: "/learn/browse", icon: Grid3X3 },
+  { name: "Company SOP", href: "/learn/company-docs?docType=SOP", icon: FileText },
+  { name: "Leave Policy", href: "/learn/company-docs?docType=LEAVE_POLICY", icon: FileText },
+  { name: "Leave Calendar", href: "/learn/company-docs?docType=LEAVE_CALENDAR", icon: CalendarDays },
+  { name: "Company Docs", href: "/learn/company-docs", icon: FileText },
   { name: "AI Search", href: "/learn/ai-chat", icon: Sparkles },
-  { name: "Analytics", href: "/learn/analytics", icon: BarChart3 },
   { name: "Profile", href: "/learn/profile", icon: User },
 ]
 
@@ -40,8 +49,9 @@ export default function LearnLayout({ children }: { children: React.ReactNode })
   const router = useRouter()
   const { user, logout } = useAuth()
   const isActive = (href: string) => {
-    if (href === "/learn") return pathname === "/learn"
-    return pathname.startsWith(href)
+    const baseHref = href.split("?")[0]
+    if (baseHref === "/learn") return pathname === "/learn"
+    return pathname.startsWith(baseHref)
   }
 
   return (
@@ -160,14 +170,14 @@ export default function LearnLayout({ children }: { children: React.ReactNode })
       </main>
 
       {/* Mobile Bottom Tab Bar */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#1C1917]/95 backdrop-blur-xl border-t border-[#FF6B35]/10" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-        <div className="flex items-center justify-around h-[72px] px-4">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#1C1917]/95 backdrop-blur-xl border-t border-[#FF6B35]/10 overflow-x-auto" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        <div className="flex items-center h-[72px] px-2 gap-2 w-max">
           {mobileNav.map((item) => {
             const active = isActive(item.href)
             return (
               <Link key={item.name} href={item.href}>
                 <motion.div
-                  className="flex flex-col items-center gap-1 py-2 px-4"
+                  className="flex flex-col items-center gap-1 py-2 px-3 flex-shrink-0"
                   whileTap={{ scale: 0.88 }}
                 >
                   <motion.div animate={{ scale: active ? [1, 1.2, 1] : 1 }} transition={{ duration: 0.3 }}>

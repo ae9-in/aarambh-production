@@ -210,6 +210,10 @@ export async function POST(req: NextRequest) {
           const meta = chunkMeta.get(c.id)
           if (!meta) return false
 
+          // Company documents (SOP/Leave policy/etc.) are org-level, not category-level.
+          // Never drop policy chunks when users have category access enabled.
+          if (meta.source_type === 'policy') return true
+
           if (meta.content_id) return allowedContent.has(meta.content_id)
           if (meta.qna_id) return allowedQna.has(meta.qna_id)
           return false
