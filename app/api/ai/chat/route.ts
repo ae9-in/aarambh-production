@@ -1,526 +1,257 @@
-import { NextResponse, type NextRequest } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
-import { createEmbedding } from '@/lib/openai'
-import Groq from 'groq-sdk'
-import { getAccessibleCategoryIdsForUser } from '@/lib/category-access'
-import { randomUUID } from 'crypto'
-import { sanitizeObject } from '@/lib/sanitize'
-import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
-import { aiChatLimiter } from '@/lib/rate-limiter'
+import { NextResponse, type NextRequest } from "next/server"
+import { randomUUID } from "crypto"
+import { supabaseAdmin } from "@/lib/supabase"
+import { createEmbedding, streamGroq } from "@/lib/ai-config"
+import { requireAuth, requireOrgMatch } from "@/lib/api-auth"
+import { aiChatLimiter } from "@/lib/rate-limiter"
+import { getAccessibleCategoryIdsForUser } from "@/lib/category-access"
 
 type ChatRequestBody = {
   question?: string
   userId?: string
   orgId?: string
   userRole?: string
-  sessionId?: string
+  sessionId?: string | null
   categoryId?: string | null
 }
 
-const groqApiKey = process.env.GROQ_API_KEY
-const groq = groqApiKey ? new Groq({ apiKey: groqApiKey }) : null
-
-function tokenize(input: string): string[] {
-  return String(input || "")
+function tokenize(text: string): string[] {
+  return String(text || "")
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter(Boolean)
+    .filter((t) => t.length >= 3)
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const contentType = req.headers.get("content-type") || ""
-    if (!contentType.includes("application/json")) {
-      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
-    }
-    const contentLength = Number(req.headers.get("content-length") || "0")
-    if (contentLength > 10240) {
-      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
-    }
-    const authUser = await requireAuth(req)
-    const body = sanitizeObject((await req.json()) as ChatRequestBody)
-    const { question, userId, orgId, userRole, sessionId: incomingSessionId, categoryId } = body
-    if (userId && authUser.id && userId !== authUser.id) {
-      return NextResponse.json({ error: 'User mismatch' }, { status: 403 })
-    }
-    const limited = aiChatLimiter(`ai-chat:${authUser.id}`)
-    if (limited) return limited
-    if (orgId) {
-      await requireOrgMatch(authUser.id, orgId)
-    }
+    const auth = await requireAuth(req)
+    const body = ((await req.json().catch(() => null)) || {}) as ChatRequestBody
 
-    // 1. Validate inputs
-    if (!question || !question.trim() || !userId || !orgId) {
+    const question = String(body.question || "").trim()
+    const userId = String(body.userId || "").trim()
+    const orgId = String(body.orgId || "").trim()
+    const userRole = String(body.userRole || "EMPLOYEE").trim()
+    const categoryId = body.categoryId ? String(body.categoryId).trim() : null
+
+    if (!question || !userId || !orgId) {
       return NextResponse.json(
-        { error: 'Missing question, userId, or orgId' },
+        { error: "Missing question, userId, or orgId" },
         { status: 400 },
       )
     }
+    if (auth.id !== userId) {
+      return NextResponse.json({ error: "User mismatch" }, { status: 403 })
+    }
+    await requireOrgMatch(auth.id, orgId)
+    const limited = aiChatLimiter(`ai-chat:${auth.id}`)
+    if (limited) return limited
 
-    // 2-5. Retrieval pipeline (embedding + vector search + access filtering).
-    let chunks: any[] = []
-    const wantsPerformerDetails = /performer|top performer|leaderboard|rank|best/i.test(question)
-    let performerContext = ""
-    try {
-      const questionEmbedding = await createEmbedding(question, 'RETRIEVAL_QUERY')
+    const accessibleCategoryIds = await getAccessibleCategoryIdsForUser(
+      orgId,
+      userId,
+      userRole || "EMPLOYEE",
+    )
+    if (categoryId && !accessibleCategoryIds.includes(categoryId)) {
+      return NextResponse.json({ error: "Category access denied" }, { status: 403 })
+    }
 
-      // Resolve category access for this user.
-      let accessibleCategoryIds: string[] | null = null
-      const { data: categoryRows, error: categoryError } = await supabaseAdmin.rpc(
-        'get_accessible_categories',
-        {
-          p_user_id: userId,
-          p_org_id: orgId,
-        },
-      )
+    const isCategorySummaryIntent = /explain what i learned in this category|what i learned|summary of this category|what did i learn/i.test(
+      question.toLowerCase(),
+    )
 
-      if (!categoryError && Array.isArray(categoryRows)) {
-        accessibleCategoryIds = categoryRows.map((r: { category_id: string }) => r.category_id)
-      } else {
-                    // Fallback for environments where get_accessible_categories is unavailable.
-                    accessibleCategoryIds = await getAccessibleCategoryIdsForUser(
-                      orgId,
-                      userId,
-                      userRole || 'EMPLOYEE',
-                    )
-      }
-
-      if (categoryId) {
-        accessibleCategoryIds = (accessibleCategoryIds || []).filter((id) => id === categoryId)
-      } else if (accessibleCategoryIds && accessibleCategoryIds.length > 0) {
-        // Category keyword steering: if question mentions category terms (e.g. "sales"),
-        // restrict retrieval to those matching categories to keep answers on-topic.
-        const { data: categoryMeta } = await supabaseAdmin
-          .from("categories")
-          .select("id,name")
-          .eq("org_id", orgId)
-          .in("id", accessibleCategoryIds)
-
-        const qTokens = new Set(tokenize(question))
-        const matchedCategoryIds = (categoryMeta || [])
-          .filter((row: any) => {
-            const nameTokens = tokenize(String(row.name || ""))
-            return nameTokens.some((t) => qTokens.has(t))
-          })
-          .map((row: any) => String(row.id))
-
-        if (matchedCategoryIds.length > 0) {
-          accessibleCategoryIds = accessibleCategoryIds.filter((id) => matchedCategoryIds.includes(id))
-        }
-      }
-
-      // Optional: include top quiz performer details in the system prompt.
-      // We keep this conditional so chat latency doesn't always increase.
-      if (wantsPerformerDetails && accessibleCategoryIds && accessibleCategoryIds.length > 0) {
-        const relevantCategoryIds = accessibleCategoryIds
-
-        const { data: contentRows, error: contentErr } = await supabaseAdmin
-          .from("content")
-          .select("id, category_id")
-          .eq("org_id", orgId)
-          .in("category_id", relevantCategoryIds)
-
-        if (!contentErr && contentRows && contentRows.length > 0) {
-          const contentIds = [...new Set(contentRows.map((r: any) => r.id).filter(Boolean))]
-
-          const { data: quizzes, error: quizErr } = await supabaseAdmin
-            .from("quizzes")
-            .select("id, content_id")
-            .in("content_id", contentIds)
-
-          if (!quizErr && quizzes && quizzes.length > 0) {
-            const quizIds = [...new Set(quizzes.map((q: any) => q.id).filter(Boolean))]
-
-            const { data: attempts, error: attemptsErr } = await supabaseAdmin
-              .from("quiz_attempts")
-              .select("user_id, score, passed")
-              .in("quiz_id", quizIds)
-              .limit(20000)
-
-            if (!attemptsErr && attempts) {
-              const statsByUser = new Map<
-                string,
-                { scoreSum: number; passCount: number; attempts: number }
-              >()
-
-              for (const a of attempts as any[]) {
-                if (!a.user_id) continue
-                const prev = statsByUser.get(a.user_id) ?? { scoreSum: 0, passCount: 0, attempts: 0 }
-                prev.scoreSum += typeof a.score === "number" ? a.score : Number(a.score ?? 0)
-                prev.passCount += a.passed ? 1 : 0
-                prev.attempts += 1
-                statsByUser.set(a.user_id, prev)
-              }
-
-              const topUsers = [...statsByUser.entries()]
-                .map(([user_id, s]) => ({
-                  user_id,
-                  avg_score: s.attempts > 0 ? s.scoreSum / s.attempts : 0,
-                  pass_rate: s.attempts > 0 ? s.passCount / s.attempts : 0,
-                  attempts: s.attempts,
-                }))
-                .sort((a, b) => b.avg_score - a.avg_score)
-                .slice(0, 3)
-
-              const topUserIds = topUsers.map((t) => t.user_id)
-              const { data: profiles } = await supabaseAdmin
-                .from("profiles")
-                .select("id, name")
-                .in("id", topUserIds)
-
-              const nameById = new Map((profiles || []).map((p: any) => [p.id, p.name]))
-              const lines = topUsers.map((t, idx) => {
-                const name = nameById.get(t.user_id) ?? "Unknown"
-                const avg = Number(t.avg_score.toFixed(2))
-                const pass = Number((t.pass_rate * 100).toFixed(1))
-                return `${idx + 1}) ${name} - Avg quiz score: ${avg}, Pass rate: ${pass}%`
-              })
-
-              performerContext = lines.join("\n")
-            }
-          }
-        }
-      }
-
-      const {
-        data: matchedChunks,
-        error: matchError,
-      } = await supabaseAdmin.rpc('match_documents', {
+    let matchedChunks: any[] = []
+    const questionEmbedding = await createEmbedding(question)
+    if (questionEmbedding) {
+      const rpcArgs: Record<string, any> = {
         query_embedding: questionEmbedding,
-        match_count: 20,
+        match_count: 5,
         filter_org_id: orgId,
-        filter_role: userRole || 'EMPLOYEE',
-      })
+        filter_role: userRole || "EMPLOYEE",
+      }
+      if (categoryId) rpcArgs.filter_category_id = categoryId
+
+      let matchError: any = null
+      const rpcPrimary = await supabaseAdmin.rpc("match_documents", rpcArgs)
+      matchedChunks = Array.isArray(rpcPrimary.data) ? rpcPrimary.data : []
+      matchError = rpcPrimary.error
+
+      // fallback for deployments where RPC doesn't accept filter_category_id
+      if (matchError && categoryId) {
+        const rpcFallback = await supabaseAdmin.rpc("match_documents", {
+          query_embedding: questionEmbedding,
+          match_count: 5,
+          filter_org_id: orgId,
+          filter_role: userRole || "EMPLOYEE",
+        })
+        matchedChunks = Array.isArray(rpcFallback.data) ? rpcFallback.data : []
+        matchError = rpcFallback.error
+      }
 
       if (matchError) {
-        console.error('chat: match_documents error', matchError)
+        console.error("chat match_documents error:", matchError)
       }
+    } else {
+      console.warn("chat: embedding unavailable, using metadata fallback")
+      const terms = tokenize(question).slice(0, 6)
+      const keyword = terms[0] || ""
+      let contentQuery = supabaseAdmin
+        .from("content")
+        .select("id,title,description,category_id")
+        .eq("org_id", orgId)
+        .eq("is_published", true)
+        .limit(5)
 
-      chunks = Array.isArray(matchedChunks) ? [...matchedChunks] : []
-
-      // Enforce category access for BOTH lesson chunks (content_id) and Q&A chunks (qna_id).
-      if (chunks.length > 0 && accessibleCategoryIds && accessibleCategoryIds.length > 0) {
-        const chunkIds = [...new Set(chunks.map((c: any) => c.id).filter(Boolean))]
-
-        const { data: chunkMetaRows } = await supabaseAdmin
-          .from('ai_chunks')
-          .select('id, content_id, source_type, qna_id')
-          .in('id', chunkIds)
-
-        const chunkMeta = new Map<
-          string,
-          { content_id: string | null; source_type: string | null; qna_id: string | null }
-        >(
-          (chunkMetaRows || []).map((r: any) => [
-            r.id,
-            {
-              content_id: (r.content_id as string | null) ?? null,
-              source_type: (r.source_type as string | null) ?? null,
-              qna_id: (r.qna_id as string | null) ?? null,
-            },
-          ]),
-        )
-
-        const lessonContentIds = [...new Set(chunks.map((c: any) => c.content_id).filter(Boolean))]
-        const qnaIds = [...new Set(chunks.map((c: any) => chunkMeta.get(c.id)?.qna_id).filter(Boolean))]
-
-        const { data: contentRows } = await supabaseAdmin
-          .from('content')
-          .select('id, category_id')
-          .in('id', lessonContentIds)
-
-        const { data: qnaRows } = await supabaseAdmin
-          .from('ai_qna_entries')
-          .select('id, category_id')
-          .in('id', qnaIds)
-
-        const allowedContent = new Set(
-          (contentRows || [])
-            .filter((row: any) => {
-              const catId = row.category_id as string | null
-              return Boolean(catId && accessibleCategoryIds?.includes(catId))
-            })
-            .map((row: any) => row.id as string),
-        )
-
-        const allowedQna = new Set(
-          (qnaRows || [])
-            .filter((row: any) => {
-              const catId = row.category_id as string | null
-              return Boolean(catId && accessibleCategoryIds?.includes(catId))
-            })
-            .map((row: any) => row.id as string),
-        )
-
-        chunks = chunks.filter((c: any) => {
-          const meta = chunkMeta.get(c.id)
-          if (!meta) return false
-
-          // Company documents (SOP/Leave policy/etc.) are org-level, not category-level.
-          // Never drop policy chunks when users have category access enabled.
-          if (meta.source_type === 'policy') return true
-
-          if (meta.content_id) return allowedContent.has(meta.content_id)
-          if (meta.qna_id) return allowedQna.has(meta.qna_id)
-          return false
-        })
+      if (categoryId) {
+        contentQuery = contentQuery.eq("category_id", categoryId)
       }
-      chunks = chunks.slice(0, 8)
-
-      // Fallback retrieval: if vector match returns nothing, use category-scoped metadata search
-      // so AI can still answer from uploaded lesson titles/descriptions.
-      if (chunks.length === 0 && accessibleCategoryIds && accessibleCategoryIds.length > 0) {
-        const terms = tokenize(question).filter((t) => t.length >= 3).slice(0, 6)
-        const keyword = terms[0] || ""
-
-        let fallbackQuery = supabaseAdmin
-          .from("content")
-          .select("id,title,description,category_id")
-          .eq("org_id", orgId)
-          .eq("is_published", true)
-          .in("category_id", accessibleCategoryIds)
-          .limit(8)
-
-        if (keyword) {
-          fallbackQuery = fallbackQuery.or(`title.ilike.%${keyword}%,description.ilike.%${keyword}%`)
-        }
-
-        const { data: fallbackRows } = await fallbackQuery
-        if (fallbackRows && fallbackRows.length > 0) {
-          chunks = fallbackRows.map((row: any, i: number) => ({
-            id: `fallback-${row.id}-${i}`,
-            content_id: row.id,
-            chunk_text: `Lesson: ${String(row.title || "").trim()}\n\nSummary: ${String(
-              row.description || "",
-            ).trim()}`,
-            similarity: 0,
-          }))
-        }
+      if (keyword) {
+        contentQuery = contentQuery.or(
+          `title.ilike.%${keyword}%,description.ilike.%${keyword}%`,
+        )
       }
-    } catch (retrievalError) {
-      console.error('chat: retrieval pipeline error', retrievalError)
-      chunks = []
+      const { data: fallbackRows } = await contentQuery
+      matchedChunks = (fallbackRows || []).map((row: any, i: number) => ({
+        id: `fallback-${row.id}-${i}`,
+        content_id: row.id,
+        chunk_text: `Lesson: ${String(row.title || "").trim()}\n\nSummary: ${String(
+          row.description || "",
+        ).trim()}`,
+      }))
     }
 
-    // 6. Build context
-    const context =
-      chunks && Array.isArray(chunks) && chunks.length
-        ? chunks.map((c: any) => c.chunk_text).join('\n\n---\n\n')
-        : ''
+    // Strong fallback for "what I learned in this category" style questions:
+    // summarize approved lessons from that category even when vector matches are weak.
+    if (categoryId && (isCategorySummaryIntent || matchedChunks.length === 0)) {
+      const { data: categoryLessons } = await supabaseAdmin
+        .from("content")
+        .select("id,title,description")
+        .eq("org_id", orgId)
+        .eq("category_id", categoryId)
+        .eq("is_published", true)
+        .order("created_at", { ascending: true })
+        .limit(25)
 
-    // 7. Create session if needed
-    // If the user doesn't exist in `profiles` yet, session insert will fail due to FK constraint.
-    // In that case we still stream the answer (but we skip persisting chat history).
-    let sessionId = incomingSessionId ?? null
-    let persistChat = true
+      if (categoryLessons && categoryLessons.length > 0) {
+        matchedChunks = categoryLessons.map((row: any, idx: number) => ({
+          id: `cat-summary-${row.id}-${idx}`,
+          content_id: row.id,
+          chunk_text: `Lesson: ${String(row.title || "").trim()}\nSummary: ${String(
+            row.description || "",
+          ).trim() || "No summary provided."}`,
+        }))
+      }
+    }
+
+    // Access-safe fallback when no explicit category is passed.
+    if (!categoryId && matchedChunks.length === 0 && accessibleCategoryIds.length > 0) {
+      const { data: scopedLessons } = await supabaseAdmin
+        .from("content")
+        .select("id,title,description,category_id")
+        .eq("org_id", orgId)
+        .eq("is_published", true)
+        .in("category_id", accessibleCategoryIds)
+        .limit(8)
+      if (scopedLessons && scopedLessons.length > 0) {
+        matchedChunks = scopedLessons.map((row: any, idx: number) => ({
+          id: `access-summary-${row.id}-${idx}`,
+          content_id: row.id,
+          chunk_text: `Lesson: ${String(row.title || "").trim()}\nSummary: ${String(
+            row.description || "",
+          ).trim() || "No summary provided."}`,
+        }))
+      }
+    }
+
+    const sourceContentIds = matchedChunks
+      .map((c: any) => c.content_id)
+      .filter(Boolean)
+      .slice(0, 5)
+    const context = matchedChunks
+      .map((c: any) => String(c.chunk_text || "").trim())
+      .filter(Boolean)
+      .join("\n\n---\n\n")
+
+    const systemPrompt = `You are an expert AI training assistant for this company.
+Your job is to help employees understand their training materials clearly and in depth.
+Answer every question in a detailed, structured, easy to understand way.
+Use bullet points, numbered steps, and clear headings in your responses.
+Be encouraging, professional, and thorough like a senior mentor explaining to a junior.
+If the answer is in the training content below, use it to give accurate specific answers.
+If the question is not covered in the training content, say this topic is not in your
+current training materials and suggest they ask their manager or check other resources.
+Never make up information that is not in the training content.
+When the user asks what they learned in this category, summarize all available lessons in this category into:
+- Key topics learned
+- Practical skills gained
+- Important points to remember
+- Next recommended practice steps
+
+Training Content Available:
+${context || "No specific content found for this question."}`
+
+    let sessionId = body.sessionId ? String(body.sessionId) : null
     if (!sessionId) {
-      try {
-        const { data: session, error: sessionError } = await supabaseAdmin
-          .from('ai_chat_sessions')
-          .insert({
-            user_id: userId,
-            org_id: orgId,
-          })
-          .select('id')
-          .single()
-
-        if (sessionError || !session) {
-          console.error('chat: session create error', sessionError)
-          persistChat = false
-          sessionId = `temp-${randomUUID()}`
-        } else {
-          sessionId = session.id as string
-        }
-      } catch (e) {
-        console.error('chat: session create exception', e)
-        persistChat = false
-        sessionId = `temp-${randomUUID()}`
-      }
+      const sessionInsert = await supabaseAdmin
+        .from("ai_chat_sessions")
+        .insert({ user_id: userId, org_id: orgId })
+        .select("id")
+        .single()
+      sessionId = sessionInsert.data?.id || `temp-${randomUUID()}`
     }
 
-    // 8. Save user message
-    if (persistChat) {
-      const { error: msgError } = await supabaseAdmin.from('ai_chat_messages').insert({
-        session_id: sessionId,
-        role: 'user',
-        content: question,
-      })
-
-      if (msgError) {
-        console.error('chat: user message insert error', msgError)
-      }
-    }
-
-    const encoder = new TextEncoder()
-    let fullText = ''
-    const sourceIds =
-      chunks && Array.isArray(chunks)
-        ? chunks
-            .map((c: any) => c.content_id)
-            .filter(Boolean)
-        : []
-
-    // 9. If nothing relevant is found, stream a grounded fallback immediately.
-    if (!context.trim()) {
-      fullText =
-        "This topic is not covered in your current training materials, or the AI could not find relevant content yet. Try asking about a specific lesson, category, or policy you've uploaded."
-
-      const readable = new ReadableStream<Uint8Array>({
-        async start(controller) {
-          const words = fullText.split(' ')
-          for (const word of words) {
-            controller.enqueue(encoder.encode(`${word} `))
-            await new Promise((resolve) => setTimeout(resolve, 20))
-          }
-
-          if (persistChat) {
-            const { error: saveError } = await supabaseAdmin.from('ai_chat_messages').insert({
-              session_id: sessionId,
-              role: 'assistant',
-              content: fullText.trim(),
-              sources: sourceIds,
-            })
-
-            if (saveError) {
-              console.error('chat: assistant fallback insert error', saveError)
-            }
-          }
-
-          controller.close()
-        },
-      })
-
-      return new Response(readable, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'X-Accel-Buffering': 'no',
-          'x-chat-session-id': String(sessionId),
-        },
-      })
-    }
-
-    // 10. Stream completion from Groq
-    if (!groq) {
-      const encoder = new TextEncoder()
-      const fullText = 'AI generation is temporarily unavailable. `GROQ_API_KEY` is missing on the server.'
-
-      const readable = new ReadableStream<Uint8Array>({
-        async start(controller) {
-          try {
-            const words = fullText.split(' ')
-            for (const word of words) {
-              controller.enqueue(encoder.encode(`${word} `))
-              await new Promise((resolve) => setTimeout(resolve, 20))
-            }
-          } finally {
-            controller.close()
-          }
-        },
-      })
-
-      return new Response(readable, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'X-Accel-Buffering': 'no',
-          'x-chat-session-id': String(sessionId),
-        },
-      })
-    }
-
-    const stream = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
-      temperature: 0.2,
-      max_tokens: 900,
-      stream: true,
-      messages: [
-        {
-          role: 'system',
-          content: `You are Arambh AI, a strict enterprise training assistant.
-
-Use ONLY the company training content provided below.
-- If the user asks something outside this content, respond exactly:
-"This topic is not covered in your current training materials."
-- Do not engage in casual/off-topic conversation, jokes, or personal chat.
-- Keep answers detailed, practical, and professional.
-- Prefer category-specific guidance; if query implies a category (e.g., Sales), answer only from that category context.
-- Output clean Markdown, with proper spacing:
-  - Use short headings (## or ###) for sections
-  - Put each bullet on a new line
-  - Use numbered lists for step-by-step instructions
-  - Add blank lines between paragraphs and sections
-  - Do not dump one giant paragraph
-- Do not invent facts beyond the provided training content.
-
-${wantsPerformerDetails && performerContext ? `Top quiz performers (from quiz activity):\n${performerContext}\n\nWhen you answer, show a short "Top performers" section at the top using only these details.\n` : ""}
-
-Training Content:
-${context}`,
-        },
-        { role: 'user', content: question },
-      ],
+    await supabaseAdmin.from("ai_chat_messages").insert({
+      session_id: sessionId,
+      role: "user",
+      content: question,
     })
+
+    const groqStream = await streamGroq(systemPrompt, question)
+    const encoder = new TextEncoder()
+    let finalAnswer = ""
 
     const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
-          for await (const chunk of stream) {
-            const text = chunk.choices?.[0]?.delta?.content || ''
-            if (text) {
-              fullText += text
-              controller.enqueue(encoder.encode(text))
-            }
+          for await (const chunk of groqStream as any) {
+            const delta = String(chunk?.choices?.[0]?.delta?.content || "")
+            if (!delta) continue
+            finalAnswer += delta
+            controller.enqueue(encoder.encode(delta))
           }
 
-          // If the model streamed nothing, still return a visible grounded response.
-          if (!fullText.trim()) {
-            const fallback =
-              'This topic is not covered in your current training materials. Try asking within a specific category you have access to, like Web Development, Sales, or Marketing.'
-            fullText = fallback
-            controller.enqueue(encoder.encode(fallback))
+          if (!finalAnswer.trim()) {
+            finalAnswer =
+              "This topic is not in your current training materials. Please ask your manager or check additional learning resources."
+            controller.enqueue(encoder.encode(finalAnswer))
           }
 
-          if (persistChat) {
-            const { error: saveError } = await supabaseAdmin
-              .from('ai_chat_messages')
-              .insert({
-                session_id: sessionId,
-                role: 'assistant',
-                content: fullText,
-                sources: sourceIds,
-              })
-
-            if (saveError) {
-              console.error('chat: assistant message insert error', saveError)
-            }
-          }
+          await supabaseAdmin.from("ai_chat_messages").insert({
+            session_id: sessionId,
+            role: "assistant",
+            content: finalAnswer,
+            sources: sourceContentIds,
+          })
 
           controller.close()
-        } catch (e) {
-          console.error('chat: stream error', e)
-          controller.error(e)
+        } catch (error) {
+          console.error("chat stream error:", error)
+          controller.error(error)
         }
       },
     })
 
     return new Response(readable, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no',
-        'x-chat-session-id': String(sessionId),
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "x-chat-session-id": String(sessionId),
       },
     })
-  } catch (e) {
-    console.error('chat route error:', e)
-    return NextResponse.json(
-      {
-        error: 'An error occurred. Please try again.',
-      },
-      { status: 500 },
-    )
+  } catch (error) {
+    console.error("chat route error:", error)
+    return NextResponse.json({ error: "AI chat failed" }, { status: 500 })
   }
 }
 

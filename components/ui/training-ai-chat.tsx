@@ -22,6 +22,13 @@ type TrainingAIChatProps = {
 
 const GREETING =
   "Hi! I am Arambh AI. Ask me anything from your training materials and I will answer with practical, step-by-step guidance.";
+const SUGGESTIONS = [
+  "Explain what I learned in this category",
+  "Give me a summary of key topics",
+  "What are the most important points to remember",
+  "Give me practice questions on this topic",
+  "Explain this concept in simple terms",
+];
 
 export function TrainingAIChat({ categoryId = null, categoryName = null }: TrainingAIChatProps) {
   const { user } = useAuth();
@@ -29,7 +36,7 @@ export function TrainingAIChat({ categoryId = null, categoryName = null }: Train
     { id: "welcome", role: "assistant", content: GREETING },
   ]);
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [thinking, setThinking] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -42,27 +49,16 @@ export function TrainingAIChat({ categoryId = null, categoryName = null }: Train
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
-  }, [messages, isLoading]);
+  }, [messages, thinking]);
 
-  async function sendMessage(e: FormEvent) {
-    e.preventDefault();
-    const question = input.trim();
-    if (!question || !user?.id || !user?.orgId || isLoading) return;
+  async function sendMessage(e?: FormEvent, questionOverride?: string) {
+    e?.preventDefault();
+    const question = (questionOverride ?? input).trim();
+    if (!question || !user?.id || !user?.orgId || thinking) return;
 
     setInput("");
-    setIsLoading(true);
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: "user",
-      content: question,
-    };
-    const assistantId = `a-${Date.now()}`;
-
-    setMessages((prev) => [
-      ...prev,
-      userMsg,
-      { id: assistantId, role: "assistant", content: "" },
-    ]);
+    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: question }]);
+    setThinking(true);
 
     try {
       const res = await fetch("/api/ai/chat", {
@@ -79,18 +75,17 @@ export function TrainingAIChat({ categoryId = null, categoryName = null }: Train
       });
 
       if (!res.ok || !res.body) {
-        let message = "AI chat request failed";
-        try {
-          const body = await res.json();
-          if (body?.error) message = String(body.error);
-        } catch {
-          // ignore parse failure
-        }
-        throw new Error(message);
+        setThinking(false);
+        toast.error("AI is not available right now");
+        return;
       }
 
       const nextSessionId = res.headers.get("x-chat-session-id");
       if (nextSessionId) setSessionId(nextSessionId);
+      setThinking(false);
+
+      const assistantId = `a-${Date.now()}`;
+      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -133,7 +128,7 @@ export function TrainingAIChat({ categoryId = null, categoryName = null }: Train
         ),
       );
     } finally {
-      setIsLoading(false);
+      setThinking(false);
     }
   }
 
@@ -157,6 +152,19 @@ export function TrainingAIChat({ categoryId = null, categoryName = null }: Train
         ref={listRef}
         className="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-[#E7E5E4] bg-[#F7F5F2] p-4"
       >
+        {messages.length === 1 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {SUGGESTIONS.map((q) => (
+              <button
+                key={q}
+                onClick={() => void sendMessage(undefined, q)}
+                className="rounded-full border border-[#E7E5E4] bg-white px-3 py-1 text-xs text-[#1C1917]"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -172,7 +180,7 @@ export function TrainingAIChat({ categoryId = null, categoryName = null }: Train
               {msg.role === "assistant" ? (
                 <div className="prose prose-sm max-w-none prose-p:my-2 prose-li:my-1 prose-headings:my-2 prose-headings:font-semibold">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.content || (isLoading ? "Thinking..." : "")}
+                    {msg.content || (thinking ? "Thinking..." : "")}
                   </ReactMarkdown>
                 </div>
               ) : (
@@ -194,11 +202,11 @@ export function TrainingAIChat({ categoryId = null, categoryName = null }: Train
             rows={2}
             placeholder="Ask Arambh AI a question..."
             className="min-h-[56px] flex-1 resize-none rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm outline-none focus:border-[#FF6B35]"
-            disabled={isLoading}
+            disabled={thinking}
           />
           <button
             type="submit"
-            disabled={isLoading || !input.trim()}
+            disabled={thinking || !input.trim()}
             className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#FF6B35] text-white transition hover:bg-[#E85520] disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Send message"
           >

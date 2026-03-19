@@ -15,6 +15,8 @@ import {
   ChevronRight,
   Star,
   Sparkles,
+  MessageCircle,
+  X,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { toast } from "sonner"
@@ -95,6 +97,13 @@ export default function LearningPathPage() {
   const [lessons, setLessons] = useState<Lesson[]>([])
   const [progress, setProgress] = useState<UserProgress[]>([])
   const [loading, setLoading] = useState(true)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatInput, setChatInput] = useState("")
+  const [chatThinking, setChatThinking] = useState(false)
+  const [chatSessionId, setChatSessionId] = useState<string | null>(null)
+  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
+    { role: "assistant", content: "Ask me anything about this category and I will explain using your uploaded lessons." },
+  ])
 
   const routeParams = useParams<{ id?: string }>()
 
@@ -174,6 +183,57 @@ export default function LearningPathPage() {
   const allCompleted = completedCount === lessons.length && lessons.length > 0
 
   const accentColor = category?.color || "#FF6B35"
+
+  const sendCategoryMessage = async () => {
+    const question = chatInput.trim()
+    if (!question || chatThinking || !user?.id || !user?.orgId || !categoryId) return
+    setChatInput("")
+    setChatMessages((p) => [...p, { role: "user", content: question }])
+    setChatThinking(true)
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          userId: user.id,
+          orgId: user.orgId,
+          userRole: user.role,
+          sessionId: chatSessionId,
+          categoryId,
+        }),
+      })
+      if (!res.ok || !res.body) {
+        toast.error("AI is not available right now")
+        setChatThinking(false)
+        return
+      }
+      const nextSessionId = res.headers.get("x-chat-session-id")
+      if (nextSessionId) setChatSessionId(nextSessionId)
+      setChatThinking(false)
+      setChatMessages((p) => [...p, { role: "assistant", content: "" }])
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const text = decoder.decode(value, { stream: true })
+        setChatMessages((p) => {
+          const arr = [...p]
+          arr[arr.length - 1] = {
+            role: "assistant",
+            content: arr[arr.length - 1].content + text,
+          }
+          return arr
+        })
+      }
+    } catch (error) {
+      console.error("category chat error:", error)
+      toast.error("AI is not available right now")
+    } finally {
+      setChatThinking(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -483,6 +543,55 @@ export default function LearningPathPage() {
           </div>
         )}
       </div>
+
+      <button
+        onClick={() => setChatOpen(true)}
+        className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-[#FF6B35] px-4 py-3 text-sm font-semibold text-white shadow-xl"
+      >
+        <MessageCircle size={16} />
+        Ask AI
+      </button>
+
+      {chatOpen && (
+        <div className="fixed inset-0 z-50 bg-black/35" onClick={() => setChatOpen(false)}>
+          <div
+            className="absolute bottom-0 left-0 right-0 mx-auto h-[72vh] w-full max-w-2xl rounded-t-2xl border border-[#E7E5E4] bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#E7E5E4] px-4 py-3">
+              <p className="font-semibold text-[#1C1917]">Ask AI about {category.name}</p>
+              <button onClick={() => setChatOpen(false)} className="rounded-md p-1 hover:bg-[#F5F5F4]">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="h-[calc(72vh-118px)] space-y-3 overflow-y-auto px-4 py-3">
+              {chatMessages.map((m, idx) => (
+                <div key={idx} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${m.role === "user" ? "bg-[#FF6B35] text-white" : "bg-[#F5F5F4] text-[#1C1917]"}`}>
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {chatThinking && <p className="text-xs text-[#78716C]">Thinking...</p>}
+            </div>
+            <div className="flex gap-2 border-t border-[#E7E5E4] p-3">
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void sendCategoryMessage()}
+                placeholder="Ask about this category..."
+                className="flex-1 rounded-lg border border-[#E7E5E4] px-3 py-2 text-sm outline-none focus:border-[#FF6B35]"
+              />
+              <button
+                onClick={() => void sendCategoryMessage()}
+                className="rounded-lg bg-[#FF6B35] px-4 py-2 text-sm font-medium text-white"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

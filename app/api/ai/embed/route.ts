@@ -1,178 +1,159 @@
-import { NextResponse, type NextRequest } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
-import { createEmbedding, chunkText, extractText } from '@/lib/openai'
-import { requireAdmin, requireOrgMatch } from '@/lib/api-auth'
-import { sanitizeObject } from '@/lib/sanitize'
+import { NextResponse, type NextRequest } from "next/server"
+import { supabaseAdmin } from "@/lib/supabase"
+import { requireAdmin, requireOrgMatch } from "@/lib/api-auth"
+import { chunkText, extractText } from "@/lib/openai"
+import { createEmbedding } from "@/lib/ai-config"
 
 type EmbedRequestBody = {
   contentId?: string
   fileUrl?: string | null
   orgId?: string
-  fileName?: string | null
-  mimeType?: string | null
+  contentTitle?: string | null
+  contentDescription?: string | null
 }
 
-const BATCH_SIZE = 3
-const BATCH_DELAY_MS = 300
+function normalizeText(value: unknown): string {
+  return String(value ?? "").trim()
+}
+
+function shouldExtractFromFile(fileUrl: string, type: string) {
+  const lower = fileUrl.toLowerCase()
+  if (type === "VIDEO" || type === "AUDIO") return false
+  return (
+    lower.endsWith(".pdf") ||
+    lower.endsWith(".docx") ||
+    lower.endsWith(".doc") ||
+    lower.endsWith(".pptx") ||
+    lower.endsWith(".ppt") ||
+    lower.includes("/raw/upload/")
+  )
+}
+
+function inferMimeAndName(fileUrl: string): { mime: string; name: string } {
+  const clean = fileUrl.split("?")[0]
+  const name = clean.split("/").pop() || "document"
+  const ext = (name.split(".").pop() || "").toLowerCase()
+  if (ext === "pdf") return { mime: "application/pdf", name }
+  if (ext === "docx")
+    return {
+      mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      name,
+    }
+  if (ext === "doc") return { mime: "application/msword", name }
+  if (ext === "pptx")
+    return {
+      mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      name,
+    }
+  if (ext === "ppt") return { mime: "application/vnd.ms-powerpoint", name }
+  return { mime: "application/octet-stream", name }
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const internalKey = req.headers.get('x-internal-embed-key')
+    const internalKey = req.headers.get("x-internal-embed-key")
     const isInternalCall =
       Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
       internalKey === process.env.SUPABASE_SERVICE_ROLE_KEY
-
     const auth = isInternalCall ? null : await requireAdmin(req)
-    const contentType = req.headers.get("content-type") || ""
-    if (!contentType.includes("application/json")) {
-      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
-    }
-    const contentLength = Number(req.headers.get("content-length") || "0")
-    if (contentLength > 10240) {
-      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
-    }
-    const body = sanitizeObject((await req.json()) as EmbedRequestBody)
-    const { contentId, fileUrl, orgId, fileName, mimeType } = body
+
+    const body = ((await req.json().catch(() => null)) || {}) as EmbedRequestBody
+    const contentId = normalizeText(body.contentId)
+    const orgId = normalizeText(body.orgId)
+    const fileUrl = normalizeText(body.fileUrl)
+    const contentTitle = normalizeText(body.contentTitle)
+    const contentDescription = normalizeText(body.contentDescription)
 
     if (!contentId || !orgId) {
-      return NextResponse.json({ error: 'Missing contentId or orgId' }, { status: 400 })
+      return NextResponse.json(
+        { error: "Missing contentId or orgId" },
+        { status: 400 },
+      )
     }
     if (!isInternalCall && auth?.id) {
       await requireOrgMatch(auth.id, orgId)
     }
 
-    // 1. Get content record for mime type + filename
     const { data: content, error: contentError } = await supabaseAdmin
-      .from('content')
-      .select('id, org_id, category_id, title, description, type')
-      .eq('id', contentId)
+      .from("content")
+      .select("id, org_id, category_id, title, description, type, categories(name)")
+      .eq("id", contentId)
       .single()
 
     if (contentError || !content) {
-      console.error('embed: content fetch error', contentError)
-      return NextResponse.json({ error: 'Content not found' }, { status: 404 })
+      return NextResponse.json({ error: "Content not found" }, { status: 404 })
     }
 
-    const mime = mimeType ?? 'application/octet-stream'
-    const name = fileName ?? `${(content.type as string | null)?.toLowerCase() || 'file'}`
+    const lessonType = normalizeText(content.type).toUpperCase()
+    const dbTitle = normalizeText(content.title) || contentTitle
+    const dbDescription = normalizeText(content.description) || contentDescription
+    const categoryName = normalizeText((content as any)?.categories?.name)
 
-    // 2. Build source text
-    const lessonType = String((content.type as string | null) || '').toUpperCase()
-    let text = ''
-    if (lessonType === 'VIDEO') {
-      const title = String((content.title as string | null) || '').trim()
-      const description = String((content.description as string | null) || '').trim()
-      text = [title, description].filter(Boolean).join('\n\n')
-    } else if (fileUrl) {
-      // For file lessons, fetch file and extract text.
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 30_000)
-      const res = await fetch(fileUrl, { signal: controller.signal }).catch((e) => {
-        console.error("embed: file fetch error", e)
-        return null as any
-      })
-      clearTimeout(timeout)
-      if (!res || !res.ok) {
-        console.error('embed: failed to fetch file', res?.status, res?.statusText)
-        return NextResponse.json({ error: 'Failed to fetch file' }, { status: 400 })
+    let sourceText = ""
+    if (fileUrl && shouldExtractFromFile(fileUrl, lessonType)) {
+      try {
+        const fileRes = await fetch(fileUrl)
+        if (fileRes.ok) {
+          const buffer = Buffer.from(await fileRes.arrayBuffer())
+          const { mime, name } = inferMimeAndName(fileUrl)
+          sourceText = await extractText(buffer, mime, name)
+        }
+      } catch (error) {
+        console.error("embed file extraction error:", error)
       }
-      if (!res.ok) {
-        console.error('embed: failed to fetch file', res.status, res.statusText)
-        return NextResponse.json({ error: 'Failed to fetch file' }, { status: 400 })
-      }
-      const buf = Buffer.from(await res.arrayBuffer())
-      text = await extractText(buf, mime, name)
     }
 
-    // Fallback to metadata text for unsupported/extraction-failed files.
-    if (!text.trim()) {
-      const title = String((content.title as string | null) || '').trim()
-      const description = String((content.description as string | null) || '').trim()
-      text = [title, description].filter(Boolean).join('\n\n')
+    if (!sourceText.trim()) {
+      sourceText = `This lesson is about: ${dbTitle || "Untitled lesson"}. ${
+        dbDescription || "No description provided."
+      }${categoryName ? ` Category: ${categoryName}.` : ""}`
     }
 
-    // 4. If no text → return { skipped: true }
-    if (!text || !text.trim()) {
-      return NextResponse.json({ skipped: true })
-    }
+    const chunks = chunkText(sourceText, 400)
+    const finalChunks = chunks.length > 0 ? chunks : [sourceText]
 
-    // 5. Chunk text
-    let chunks = chunkText(text, 400)
-    if (!chunks.length && text.trim()) {
-      // For short lesson metadata (common in video content), store a single chunk.
-      chunks = [text.trim()]
-    }
-
-    if (!chunks.length) {
-      return NextResponse.json({ skipped: true })
-    }
-
-    // 6. Delete existing chunks for this content
     const { error: deleteError } = await supabaseAdmin
-      .from('ai_chunks')
+      .from("ai_chunks")
       .delete()
-      .eq('content_id', contentId)
-
+      .eq("content_id", contentId)
     if (deleteError) {
-      console.error('embed: delete ai_chunks error', deleteError)
+      console.error("embed delete old chunks error:", deleteError)
     }
 
-    // 7. Create embeddings and store in ai_chunks (batched)
-    let allowedRoles = ['EMPLOYEE', 'MANAGER', 'ADMIN', 'SUPER_ADMIN']
-    const categoryId = (content.category_id as string | null) ?? null
-    if (categoryId) {
-      const { data: accessRule } = await supabaseAdmin
-        .from('category_access')
-        .select('allowed_roles')
-        .eq('org_id', orgId)
-        .eq('category_id', categoryId)
-        .maybeSingle()
-
-      const configuredRoles = (accessRule?.allowed_roles as string[] | null) ?? []
-      if (configuredRoles.length > 0) {
-        allowedRoles = configuredRoles
+    let successCount = 0
+    for (let i = 0; i < finalChunks.length; i += 1) {
+      const chunk = finalChunks[i]
+      const embedding = await createEmbedding(chunk)
+      if (!embedding) {
+        console.error(`embed skipped chunk ${i}: embedding failed`)
+        continue
       }
-    }
 
-    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-      const batch = chunks.slice(i, i + BATCH_SIZE)
-
-      await Promise.all(
-        batch.map(async (chunk, idx) => {
-          try {
-            const embedding = await createEmbedding(chunk)
-            const chunkIndex = i + idx
-
-            const { error: insertError } = await supabaseAdmin.from('ai_chunks').insert({
-              content_id: contentId,
-              org_id: orgId,
-              source_type: 'lesson',
-              chunk_text: chunk,
-              chunk_index: chunkIndex,
-              token_count: chunk.split(' ').length,
-              embedding,
-              allowed_roles: allowedRoles,
-            })
-
-            if (insertError) {
-              console.error('embed: ai_chunks insert error', insertError)
-            }
-          } catch (e) {
-            console.error('embed: embedding error', e)
-          }
-        }),
-      )
-
-      if (i + BATCH_SIZE < chunks.length) {
-        await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS))
+      const { error: insertError } = await supabaseAdmin.from("ai_chunks").insert({
+        content_id: contentId,
+        org_id: orgId,
+        source_type: "lesson",
+        chunk_text: chunk,
+        chunk_index: i,
+        token_count: chunk.split(/\s+/).filter(Boolean).length,
+        embedding,
+        allowed_roles: ["EMPLOYEE", "MANAGER", "ADMIN", "SUPER_ADMIN"],
+      })
+      if (insertError) {
+        console.error(`embed insert error for chunk ${i}:`, insertError)
+        continue
       }
+      successCount += 1
     }
 
-    // 8. Return summary
-    return NextResponse.json({ chunksCreated: chunks.length })
-  } catch (e) {
-    console.error('embed route error:', e)
-    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
+    return NextResponse.json({
+      contentId,
+      chunksRequested: finalChunks.length,
+      chunksEmbedded: successCount,
+    })
+  } catch (error) {
+    console.error("embed route error:", error)
+    return NextResponse.json({ error: "Embed failed" }, { status: 500 })
   }
 }
 

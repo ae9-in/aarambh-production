@@ -2,8 +2,6 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { uploadToCloudinary, detectType, detectResourceType } from '@/lib/cloudinary'
 
-const EMBEDDABLE_TYPES = new Set(['PDF', 'NOTE', 'PPT', 'VIDEO'])
-
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData()
@@ -84,25 +82,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to save content' }, { status: 400 })
     }
 
-    if (EMBEDDABLE_TYPES.has(fileType)) {
-      const origin = req.nextUrl.origin
-      fetch(`${origin}/api/ai/embed`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-internal-embed-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-        },
-        body: JSON.stringify({
-          contentId: data.id,
-          fileUrl: secureUrl,
-          orgId,
-          fileName,
-          mimeType,
-        }),
-      }).catch(e => {
-        console.error('embed trigger error:', e)
-      })
-    }
+    const origin = req.nextUrl.origin
+    fetch(`${origin}/api/ai/embed`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-embed-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+      },
+      body: JSON.stringify({
+        contentId: data.id,
+        fileUrl: secureUrl,
+        orgId,
+        contentTitle: inferredTitle,
+        contentDescription: description || inferredTitle,
+      }),
+    }).catch(e => {
+      console.error('embed trigger error:', e)
+    })
 
     return NextResponse.json({ content: data }, { status: 201 })
   } catch (e) {
