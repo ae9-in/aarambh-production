@@ -25,6 +25,14 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'Arambh | India\'s Premium Training & Knowledge Management System',
   description: 'Arambh centralizes every SOP, training video, and company process — so every employee knows exactly what to do, from day one. Trusted by 500+ teams across India.',
+  icons: {
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    shortcut: '/favicon.ico',
+    apple: '/icon.svg',
+  },
   keywords: ['training management', 'knowledge management', 'employee onboarding', 'SOP management', 'AI knowledge assistant', 'India'],
   authors: [{ name: 'Arambh' }],
   openGraph: {

@@ -4,6 +4,7 @@ import { motion, useScroll, useTransform } from "framer-motion"
 import { useState } from "react"
 import { Menu, X } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { AarambhLogo } from "@/components/aarambh-logo"
 
 const navLinks = [
   { name: "Features", href: "#features" },
@@ -34,29 +35,7 @@ export function Navbar() {
       >
         {/* Logo */}
         <a href="#" className="flex items-center gap-1.5 group">
-          <span className="font-sans font-extrabold text-base text-[#1C1917] tracking-tight">
-            Arambh
-          </span>
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 48 48"
-            fill="none"
-            className="group-hover:animate-flicker"
-          >
-            <path
-              d="M24 4C24 4 28 12 28 18C28 22 26 24 24 26C22 24 20 22 20 18C20 12 24 4 24 4Z"
-              fill="#FF6B35"
-            />
-            <path
-              d="M24 10C24 10 32 20 32 28C32 36 28 40 24 44C20 40 16 36 16 28C16 20 24 10 24 10Z"
-              fill="#C8A96E"
-            />
-            <path
-              d="M24 20C24 20 28 26 28 32C28 36 26 38 24 40C22 38 20 36 20 32C20 26 24 20 24 20Z"
-              fill="#FF6B35"
-            />
-          </svg>
+          <AarambhLogo iconClassName="group-hover:animate-flicker" />
         </a>
 
         {/* Desktop Nav Links */}
