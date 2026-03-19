@@ -31,6 +31,11 @@ export function NotificationDropdown() {
   }
 
   const navigateByType = (notif: typeof sorted[number]) => {
+    if (notif.action_url) {
+      router.push(notif.action_url)
+      return
+    }
+
     const type = notif.type ?? ""
     if (type === "content" && (notif as any).content_id) {
       router.push(`/learn/content/${(notif as any).content_id}`)

@@ -13,6 +13,9 @@ export type RealtimeNotification = {
   type: string | null
   is_read: boolean
   created_at: string
+  action_url?: string | null
+  content_id?: string | null
+  quiz_id?: string | null
 }
 
 export function useRealtimeNotifications(userId?: string | null) {
@@ -23,7 +26,7 @@ export function useRealtimeNotifications(userId?: string | null) {
     if (!userId) return
     let cancelled = false
 
-    async function loadInitial() {
+    async function loadLatest() {
       try {
         setLoading(true)
         const { data, error } = await supabase
@@ -45,7 +48,7 @@ export function useRealtimeNotifications(userId?: string | null) {
       }
     }
 
-    loadInitial()
+    loadLatest()
 
     const channel = supabase
       .channel(`notifications-${userId}`)
@@ -65,10 +68,30 @@ export function useRealtimeNotifications(userId?: string | null) {
           })
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${userId}`,
+        },
+        payload => {
+          const updated = payload.new as RealtimeNotification
+          setNotifications(prev =>
+            prev.map(n => (n.id === updated.id ? { ...n, ...updated } : n)),
+          )
+        },
+      )
       .subscribe()
+
+    const pollId = setInterval(() => {
+      void loadLatest()
+    }, 20_000)
 
     return () => {
       cancelled = true
+      clearInterval(pollId)
       void supabase.removeChannel(channel)
     }
   }, [userId])

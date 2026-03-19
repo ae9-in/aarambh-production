@@ -23,6 +23,7 @@ import {
   X,
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
+import { NotificationDropdown } from "@/components/notification-dropdown"
 
 export default function DashboardLayout({
   children,
@@ -513,10 +514,7 @@ export default function DashboardLayout({
             </div>
 
             {/* Notification */}
-            <button className="relative rounded-lg p-2 hover:bg-[#E8E6E1] transition-colors">
-              <Bell size={22} className="text-[#1C1917]" />
-              <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-[#FF6B35] rounded-full" />
-            </button>
+            <NotificationDropdown />
 
             {/* Profile */}
             <div className="flex items-center gap-1 sm:gap-2">
