@@ -1,4 +1,3 @@
-import DOMPurify from "isomorphic-dompurify"
 import isEmail from "validator/lib/isEmail"
 import { z } from "zod"
 
@@ -20,7 +19,9 @@ const BLOCK_PATTERNS: RegExp[] = [
 ]
 
 export function sanitizeString(value: string): string {
-  let out = DOMPurify.sanitize(value, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })
+  // Keep this utility server-safe for Next.js API routes (no DOM dependencies).
+  let out = String(value ?? "")
+  out = out.replace(/<[^>]*>/g, "")
   for (const pattern of BLOCK_PATTERNS) {
     out = out.replace(pattern, "")
   }
