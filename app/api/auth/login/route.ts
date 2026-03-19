@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
     const cookiePayload = JSON.stringify({
       id: profile.id,
       role: profile.role,
+      orgId: profile.org_id ?? null,
     })
 
     const res = NextResponse.json({ profile })

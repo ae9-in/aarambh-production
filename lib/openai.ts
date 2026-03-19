@@ -12,7 +12,7 @@ const geminiClient = geminiApiKey ? new GoogleGenerativeAI(geminiApiKey) : null
 type EmbeddingTaskType = 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY'
 
 async function embedWithGeminiModel(
-  modelName: 'text-embedding-004' | 'gemini-embedding-001' | 'embedding-001',
+  modelName: 'text-embedding-004' | 'gemini-embedding-001',
   text: string,
   taskType: EmbeddingTaskType,
 ) {
@@ -58,11 +58,11 @@ export async function createEmbedding(
     try {
       res = await embedWithGeminiModel('gemini-embedding-001', text, taskType)
     } catch (secondaryError) {
-      console.warn(
-        'Gemini gemini-embedding-001 failed, falling back to embedding-001:',
-        secondaryError,
+      throw new Error(
+        `Embedding failed for Gemini models (text-embedding-004 and gemini-embedding-001). Last error: ${
+          (secondaryError as any)?.message || String(secondaryError)
+        }`,
       )
-      res = await embedWithGeminiModel('embedding-001', text, taskType)
     }
   }
   const raw = res.embedding.values

@@ -1,6 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
+function isMissingOrgIdColumn(error: any): boolean {
+  const message = String(error?.message ?? '')
+  return (
+    error?.code === '42703' ||
+    message.includes('column user_progress.org_id does not exist') ||
+    message.includes("Could not find the 'org_id' column of 'user_progress'")
+  )
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl
@@ -20,7 +29,6 @@ export async function GET(req: NextRequest) {
     const [
       { data: profiles, error: profilesError },
       { data: content, error: contentError },
-      { data: progress, error: progressError },
       { data: weeklyActivity, error: weeklyError },
       { data: quizAttempts, error: quizError },
       { data: chatSessions, error: chatError },
@@ -47,15 +55,6 @@ export async function GET(req: NextRequest) {
         }>('id,type,completion_count,view_count,org_id')
         .eq('org_id', orgId),
       supabaseAdmin
-        .from('user_progress')
-        .select<'user_id,status,completed_at,org_id', {
-          user_id: string
-          status: string
-          completed_at: string | null
-          org_id: string
-        }>('user_id,status,completed_at,org_id')
-        .eq('org_id', orgId),
-      supabaseAdmin
         .from('weekly_activity')
         .select<'*', any>('*')
         .eq('org_id', orgId)
@@ -69,6 +68,40 @@ export async function GET(req: NextRequest) {
         .select<'id,org_id', { id: string; org_id: string }>('id,org_id')
         .eq('org_id', orgId),
     ])
+
+    let progress: any[] | null = null
+    let progressError: any = null
+    const withOrg = await supabaseAdmin
+      .from('user_progress')
+      .select(
+        `
+        user_id,
+        status,
+        completed_at,
+        content:content_id ( org_id )
+      `,
+      )
+      .eq('content.org_id', orgId)
+
+    progress = withOrg.data as any[] | null
+    progressError = withOrg.error
+
+    if (progressError && isMissingOrgIdColumn(progressError)) {
+      const fallback = await supabaseAdmin
+        .from('user_progress')
+        .select(
+          `
+          user_id,
+          status,
+          completed_at,
+          content:content_id ( org_id )
+        `,
+        )
+      progress = (fallback.data as any[] | null)?.filter(
+        (row) => (row as any)?.content?.org_id === orgId,
+      ) ?? []
+      progressError = fallback.error
+    }
 
     if (profilesError) console.error('analytics: profiles error', profilesError)
     if (contentError) console.error('analytics: content error', contentError)

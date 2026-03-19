@@ -284,6 +284,23 @@ export default function DashboardLayout({
                         </span>
                       )}
                     </Link>
+                    <Link
+                      href="/dashboard/users/progress"
+                      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all relative ${
+                        pathname === "/dashboard/users/progress"
+                          ? "bg-[#2A2724] text-white"
+                          : "text-[#A8A29E] hover:text-white hover:bg-[#2A2724]"
+                      }`}
+                    >
+                      {pathname === "/dashboard/users/progress" && (
+                        <motion.div
+                          layoutId="activeIndicator"
+                          className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-[#FF6B35] rounded-r-full"
+                        />
+                      )}
+                      <BarChart3 size={16} />
+                      Employee Progress
+                    </Link>
                   </div>
                 </motion.div>
               )}
