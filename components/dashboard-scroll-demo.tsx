@@ -6,7 +6,7 @@ import { ArrowRight } from "lucide-react";
 
 export function DashboardScrollDemo() {
   return (
-    <div className="flex flex-col overflow-hidden">
+    <div className="flex flex-col overflow-x-clip overflow-y-visible">
       <ContainerScroll
         titleComponent={
           <>

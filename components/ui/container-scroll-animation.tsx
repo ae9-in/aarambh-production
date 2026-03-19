@@ -29,15 +29,15 @@ export const ContainerScroll = ({
     offset: ["start start", "end end"],
   });
 
-  const rotate = useTransform(scrollYProgress, [0, 1], [20, 0]);
+  const rotate = useTransform(scrollYProgress, [0, 1], [8, 0]);
   const scale = useTransform(scrollYProgress, [0, 1], [1.05, 1]);
   // Keep vertical motion subtle to avoid large blank bands on small screens.
-  const translate = useTransform(scrollYProgress, [0, 1], [0, -36]);
+  const translate = useTransform(scrollYProgress, [0, 1], [0, -20]);
 
   return (
     <div
       ref={containerRef}
-      className="relative min-h-[72vh] md:min-h-[90vh] flex items-center justify-center p-0 md:p-8"
+      className="relative min-h-[72vh] md:min-h-[90vh] flex items-center justify-center px-2 sm:px-3 md:px-8 py-0"
     >
       <div
         className="py-0 md:py-8 w-full relative"
@@ -112,12 +112,10 @@ export const Card = ({
       style={{
         translateY: translate,
         transformStyle: "preserve-3d",
-        boxShadow:
-          "0 0 #0000004d, 0 9px 20px #0000004a, 0 37px 37px #00000042, 0 84px 50px #00000026, 0 149px 60px #0000000a, 0 233px 65px #00000003",
       }}
-      className="max-w-5xl -mt-2 mx-auto h-[25rem] sm:h-[28rem] md:h-[40rem] w-full border-4 border-[#FF6B35] p-2 md:p-6 bg-[#1C1917] rounded-[30px] md:-mt-16"
+      className="mx-auto -mt-2 md:-mt-16 h-[24rem] sm:h-[28rem] md:h-[40rem] w-[calc(100%-0.25rem)] sm:w-[calc(100%-0.5rem)] md:w-full max-w-[96vw] md:max-w-5xl border-2 sm:border-4 border-[#FF6B35] p-1.5 sm:p-2 md:p-6 bg-[#1C1917] rounded-[22px] sm:rounded-[26px] md:rounded-[30px] shadow-[0_12px_30px_rgba(0,0,0,0.25)] md:shadow-[0_24px_60px_rgba(0,0,0,0.35)]"
     >
-      <div className="h-full w-full overflow-hidden rounded-2xl bg-[#FAF9F7] dark:bg-[#1C1917] md:p-4">
+      <div className="h-full w-full overflow-hidden rounded-[16px] sm:rounded-2xl bg-[#FAF9F7] dark:bg-[#1C1917] md:p-4">
         {children}
       </div>
     </motion.div>
