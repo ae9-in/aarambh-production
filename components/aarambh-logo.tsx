@@ -9,7 +9,7 @@ export function AarambhLogo({ textClassName, iconClassName }: AarambhLogoProps) 
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={textClassName ?? "font-sans font-extrabold text-base text-[#1C1917] tracking-tight"}>
-        AARAMbh
+        AARAMBH
       </span>
       <svg
         width="20"
