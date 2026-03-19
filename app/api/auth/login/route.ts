@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { sanitizeObject, validateEmail } from "@/lib/sanitize"
+import isEmail from "validator/lib/isEmail"
 import { getClientIp, loginLimiter } from "@/lib/rate-limiter"
 
 export async function POST(req: NextRequest) {
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     const limited = loginLimiter(`login:${ip}`)
     if (limited) return limited
 
-    const body = sanitizeObject((await req.json().catch(() => null)) ?? {})
+    const body = (await req.json().catch(() => null)) ?? {}
     const email = body?.email?.toString().trim().toLowerCase()
     const password = body?.password?.toString()
 
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       )
     }
-    if (!validateEmail(email)) {
+    if (!isEmail(email)) {
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 })
     }
 
