@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { sanitizeObject } from '@/lib/sanitize'
+import { requireAuth } from '@/lib/api-auth'
 
 type RouteParams = {
   params: Promise<{
@@ -8,6 +10,7 @@ type RouteParams = {
 }
 
 export async function GET(_req: NextRequest, { params }: RouteParams) {
+  await requireAuth(_req)
   const { id } = await params
 
   const { data: category, error: catError } = await supabaseAdmin
@@ -42,10 +45,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
 }
 
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
+  await requireAuth(req)
   const { id } = await params
 
   try {
-    const body = await req.json()
+    const body = sanitizeObject(await req.json())
     const {
       name,
       description,
@@ -92,6 +96,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: RouteParams) {
+  await requireAuth(_req)
   const { id } = await params
 
   const { error } = await supabaseAdmin.from('categories').delete().eq('id', id)

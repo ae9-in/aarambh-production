@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { sanitizeObject, validateEmail, containsHtml } from "@/lib/sanitize"
+import { requireAdmin } from "@/lib/api-auth"
+import { checkRateLimit, getIpFromRequestHeaders } from "@/lib/rate-limit"
 
 function freshAdmin() {
   return createClient(
@@ -12,13 +15,27 @@ function freshAdmin() {
 export async function POST(req: NextRequest) {
   const admin = freshAdmin()
   try {
-    const body = await req.json().catch(() => null)
+    const rawBody = await req.json().catch(() => null)
+    const body = sanitizeObject(rawBody ?? {})
+    const allowedFields = new Set(["name", "email", "phone", "company", "team_size", "teamSize", "message"])
+    const extraFields = Object.keys(body as Record<string, unknown>).filter((k) => !allowedFields.has(k))
+    if (extraFields.length > 0) {
+      return NextResponse.json({ error: `Unexpected fields: ${extraFields.join(", ")}` }, { status: 400 })
+    }
+
+    const ip = getIpFromRequestHeaders(req.headers)
+    const limit = checkRateLimit({ key: `enquiries:${ip}`, limit: 5, windowMs: 60 * 60 * 1000 })
+    if (!limit.success) {
+      const res = NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
+      res.headers.set("Retry-After", String(limit.retryAfterSeconds))
+      return res
+    }
 
     const name = body?.name?.toString().trim()
     const email = body?.email?.toString().trim()
-    const phone = body?.phone?.toString().trim()
+    const phone = body?.phone?.toString().trim() ?? ""
     const company = body?.company?.toString().trim() || null
-    const teamSize = body?.teamSize?.toString().trim() || null
+    const teamSize = (body as any)?.team_size?.toString().trim() || body?.teamSize?.toString().trim() || null
     const message = body?.message?.toString().trim() || null
 
     if (!name || !email || !phone) {
@@ -26,6 +43,25 @@ export async function POST(req: NextRequest) {
         { error: "Name, email and phone are required." },
         { status: 400 },
       )
+    }
+    if (name.length < 1 || name.length > 100) {
+      return NextResponse.json({ error: "Name must be between 1 and 100 characters." }, { status: 400 })
+    }
+    if (!validateEmail(email)) {
+      return NextResponse.json({ error: "Invalid email format." }, { status: 400 })
+    }
+    if (!/^\d{7,15}$/.test(phone)) {
+      return NextResponse.json({ error: "Phone must be numeric and 7-15 digits." }, { status: 400 })
+    }
+    if (company && company.length > 120) {
+      return NextResponse.json({ error: "Company is too long." }, { status: 400 })
+    }
+    if (message && message.length > 5000) {
+      return NextResponse.json({ error: "Message is too long." }, { status: 400 })
+    }
+    const htmlFields = [name, email, phone, company || "", teamSize || "", message || ""]
+    if (htmlFields.some((f) => containsHtml(String(f)))) {
+      return NextResponse.json({ error: "HTML/script content is not allowed." }, { status: 400 })
     }
 
     // Basic org selection: use the first organization as the primary org
@@ -116,6 +152,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const admin = freshAdmin()
   try {
+    await requireAdmin(req)
     const { searchParams } = req.nextUrl
     const status = searchParams.get("status")
     const countOnly = searchParams.get("count") === "true"

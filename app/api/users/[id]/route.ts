@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { sanitizeObject } from "@/lib/sanitize"
+import { requireAdmin } from "@/lib/api-auth"
 
 function freshAdmin() {
   return createClient(
@@ -20,29 +22,14 @@ export async function PATCH(
 ) {
   const admin = freshAdmin()
   try {
-    const cookie = req.cookies.get("arambh_user")?.value
-    if (!cookie) {
-      return NextResponse.json({ error: "Not authenticated." }, { status: 401 })
-    }
-
-    let callerRole: string | null = null
-    try {
-      const parsed = JSON.parse(cookie)
-      callerRole = parsed.role
-    } catch {
-      // ignore
-    }
-
-    if (!callerRole || !["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(callerRole)) {
-      return NextResponse.json({ error: "Insufficient permissions." }, { status: 403 })
-    }
+    await requireAdmin(req)
 
     const { id } = await params
     if (!id) {
       return NextResponse.json({ error: "Missing user id." }, { status: 400 })
     }
 
-    const body = await req.json().catch(() => null)
+    const body = sanitizeObject((await req.json().catch(() => null)) ?? {})
     if (!body) {
       return NextResponse.json({ error: "No data provided." }, { status: 400 })
     }
@@ -149,5 +136,28 @@ export async function PATCH(
       { error: "Internal server error." },
       { status: 500 },
     )
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const admin = freshAdmin()
+  try {
+    await requireAdmin(req)
+    const { id } = await params
+    if (!id) {
+      return NextResponse.json({ error: "Missing user id." }, { status: 400 })
+    }
+    const { error } = await admin.from("profiles").delete().eq("id", id)
+    if (error) {
+      console.error("user delete error:", error)
+      return NextResponse.json({ error: "Failed to delete user." }, { status: 500 })
+    }
+    return NextResponse.json({ success: true })
+  } catch (e) {
+    console.error("user DELETE error:", e)
+    return NextResponse.json({ error: "Internal server error." }, { status: 500 })
   }
 }

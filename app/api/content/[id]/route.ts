@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAdminStorage } from '@/lib/firebase-admin'
 import { getAccessibleCategoryIdsForUser } from '@/lib/category-access'
+import { sanitizeObject } from '@/lib/sanitize'
+import { requireAuth } from '@/lib/api-auth'
 
 const BUCKET_NAME = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'arambh-prod.appspot.com'
 
@@ -12,6 +14,7 @@ type RouteParams = {
 }
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
+  await requireAuth(req)
   const { id } = await params
   const { searchParams } = new URL(req.url)
   const userId = searchParams.get('userId')
@@ -127,10 +130,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 }
 
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
+  await requireAuth(req)
   const { id } = await params
 
   try {
-    const body = await req.json()
+    const body = sanitizeObject(await req.json())
     const {
       title,
       description,
@@ -177,6 +181,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 }
 
 export async function DELETE(_req: NextRequest, { params }: RouteParams) {
+  await requireAuth(_req)
   const { id } = await params
 
   const {

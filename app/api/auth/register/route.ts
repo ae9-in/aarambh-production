@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { supabaseAdmin } from "@/lib/supabase"
+import { sanitizeObject, validateEmail } from "@/lib/sanitize"
+import { checkRateLimit, getIpFromRequestHeaders } from "@/lib/rate-limit"
 
 function toRoleKey(value?: string | null) {
   if (!value) return null
@@ -9,9 +11,17 @@ function toRoleKey(value?: string | null) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null)
+    const ip = getIpFromRequestHeaders(req.headers)
+    const limit = checkRateLimit({ key: `register:${ip}`, limit: 3, windowMs: 60 * 60 * 1000 })
+    if (!limit.success) {
+      const res = NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
+      res.headers.set("Retry-After", String(limit.retryAfterSeconds))
+      return res
+    }
+
+    const body = sanitizeObject((await req.json().catch(() => null)) ?? {})
     const name = body?.name?.toString().trim()
-    const email = body?.email?.toString().trim()
+    const email = body?.email?.toString().trim().toLowerCase()
     const password = body?.password?.toString()
     const department = body?.department?.toString().trim() || null
     const phone = body?.phone?.toString().trim() || null
@@ -19,6 +29,12 @@ export async function POST(req: NextRequest) {
     if (!name || !email || !password) {
       return NextResponse.json(
         { error: "Name, email, and password are required." },
+        { status: 400 },
+      )
+    }
+    if (!validateEmail(email)) {
+      return NextResponse.json(
+        { error: "Invalid email format." },
         { status: 400 },
       )
     }

@@ -40,6 +40,8 @@ export async function GET(req: NextRequest) {
       )
       res.cookies.set("arambh_user", "", {
         httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
         path: "/",
         maxAge: 0,
       })

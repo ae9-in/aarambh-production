@@ -4,6 +4,9 @@ import { createEmbedding } from '@/lib/openai'
 import Groq from 'groq-sdk'
 import { getAccessibleCategoryIdsForUser } from '@/lib/category-access'
 import { randomUUID } from 'crypto'
+import { sanitizeObject } from '@/lib/sanitize'
+import { requireAuth } from '@/lib/api-auth'
+import { checkRateLimit } from '@/lib/rate-limit'
 
 type ChatRequestBody = {
   question?: string
@@ -19,8 +22,22 @@ const groq = groqApiKey ? new Groq({ apiKey: groqApiKey }) : null
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as ChatRequestBody
+    const authUser = await requireAuth(req)
+    const body = sanitizeObject((await req.json()) as ChatRequestBody)
     const { question, userId, orgId, userRole, sessionId: incomingSessionId, categoryId } = body
+    if (userId && authUser.id && userId !== authUser.id) {
+      return NextResponse.json({ error: 'User mismatch' }, { status: 403 })
+    }
+    const rate = checkRateLimit({
+      key: `ai-chat:${authUser.id}`,
+      limit: 20,
+      windowMs: 60 * 60 * 1000,
+    })
+    if (!rate.success) {
+      const res = NextResponse.json({ error: 'Too Many Requests' }, { status: 429 })
+      res.headers.set('Retry-After', String(rate.retryAfterSeconds))
+      return res
+    }
 
     // 1. Validate inputs
     if (!question || !question.trim() || !userId || !orgId) {

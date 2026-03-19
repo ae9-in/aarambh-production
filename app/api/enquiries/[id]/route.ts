@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { sanitizeObject, containsHtml } from "@/lib/sanitize"
+import { requireAdmin } from "@/lib/api-auth"
 
 function freshAdmin() {
   return createClient(
@@ -15,12 +17,13 @@ export async function PATCH(
 ) {
   const admin = freshAdmin()
   try {
+    await requireAdmin(req)
     const { id } = await params
     if (!id) {
       return NextResponse.json({ error: "Missing id" }, { status: 400 })
     }
 
-    const body = await req.json().catch(() => null)
+    const body = sanitizeObject((await req.json().catch(() => null)) ?? {})
     const status = body?.status?.toString().trim()
     const notes = body?.notes?.toString().trim()
 
@@ -29,6 +32,15 @@ export async function PATCH(
         { error: "Nothing to update." },
         { status: 400 },
       )
+    }
+    if (status && !["new", "in_progress", "closed", "resolved"].includes(status)) {
+      return NextResponse.json({ error: "Invalid status value." }, { status: 400 })
+    }
+    if (typeof notes === "string" && notes.length > 2000) {
+      return NextResponse.json({ error: "Notes too long." }, { status: 400 })
+    }
+    if (typeof notes === "string" && containsHtml(notes)) {
+      return NextResponse.json({ error: "HTML/script content is not allowed." }, { status: 400 })
     }
 
     const updatePayload: Record<string, unknown> = {}

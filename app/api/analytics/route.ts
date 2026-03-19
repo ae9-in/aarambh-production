@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireAdmin } from '@/lib/api-auth'
 
 function isMissingOrgIdColumn(error: any): boolean {
   const message = String(error?.message ?? '')
@@ -12,6 +13,7 @@ function isMissingOrgIdColumn(error: any): boolean {
 
 export async function GET(req: NextRequest) {
   try {
+    await requireAdmin(req)
     const { searchParams } = req.nextUrl
     const orgId = searchParams.get('orgId')
     const periodParam = searchParams.get('period')

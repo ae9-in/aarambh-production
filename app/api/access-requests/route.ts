@@ -1,8 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { sanitizeObject } from '@/lib/sanitize'
+import { requireAuth } from '@/lib/api-auth'
 
 export async function GET(req: NextRequest) {
   try {
+    await requireAuth(req)
     const { searchParams } = new URL(req.url)
     const orgId = searchParams.get('orgId')
     const userId = searchParams.get('userId')
@@ -58,7 +61,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    await requireAuth(req)
+    const body = sanitizeObject(await req.json())
     const {
       categoryId,
       userId,
