@@ -10,10 +10,10 @@ export function DashboardScrollDemo() {
       <ContainerScroll
         titleComponent={
           <>
-            <h2 className="text-4xl md:text-5xl font-bold text-[#1C1917] dark:text-[#FAF9F7] mb-4">
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-[#1C1917] dark:text-[#FAF9F7] mb-3 md:mb-4 leading-tight">
               Your Complete Training Hub
             </h2>
-            <p className="text-lg md:text-xl text-[#78716C] dark:text-[#A8A29E] max-w-3xl mx-auto">
+            <p className="text-base sm:text-lg md:text-xl text-[#78716C] dark:text-[#A8A29E] max-w-3xl mx-auto px-2 sm:px-0">
               Manage categories, lessons, users, and analytics all in one beautiful, intuitive dashboard. Watch your training program come to life.
             </p>
           </>
@@ -21,21 +21,25 @@ export function DashboardScrollDemo() {
       >
         <div className="w-full h-full bg-[#F5F3F0] rounded-lg overflow-hidden flex flex-col">
           {/* Dashboard Header */}
-          <div className="bg-[#1C1917] px-6 py-3 flex items-center justify-between border-b border-[#FF6B35]/20">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-[#FF6B35] rounded-lg flex items-center justify-center">
+          <div className="bg-[#1C1917] px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between border-b border-[#FF6B35]/20">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 bg-[#FF6B35] rounded-lg flex items-center justify-center shrink-0">
                 <span className="text-white font-bold text-sm">A</span>
               </div>
-              <span className="text-[#FAF9F7] font-semibold">Training Management System</span>
+              <span className="text-[#FAF9F7] font-semibold text-sm sm:text-base truncate">
+                Training Management System
+              </span>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4 pl-2">
               <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-[#2A2622] rounded-full">
                 <svg className="w-4 h-4 text-[#A8A29E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 <input type="text" placeholder="Search..." className="bg-transparent text-[#FAF9F7] text-sm placeholder-[#78716C] outline-none w-32" />
               </div>
-              <div className="w-8 h-8 bg-[#FF6B35]/20 rounded-full flex items-center justify-center text-[#FF6B35] text-sm font-bold">3</div>
+              <div className="w-7 h-7 sm:w-8 sm:h-8 bg-[#FF6B35]/20 rounded-full flex items-center justify-center text-[#FF6B35] text-xs sm:text-sm font-bold">
+                3
+              </div>
             </div>
           </div>
 
