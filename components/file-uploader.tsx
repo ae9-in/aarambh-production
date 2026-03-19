@@ -1,11 +1,10 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useDropzone } from "react-dropzone"
 import { motion, AnimatePresence } from "framer-motion"
 import { Upload, CheckCircle2, AlertCircle, FileText, Video, Music, Image as ImageIcon } from "lucide-react"
 import { toast } from "sonner"
-import { uploadToFirebase, generatePath, detectType, type ProgressCallback } from "@/lib/firebase"
 
 type FileUploaderProps = {
   orgId: string
@@ -23,17 +22,33 @@ type UploadState = {
 
 export function FileUploader({ orgId, userId, categoryId, onUploadComplete }: FileUploaderProps) {
   const [upload, setUpload] = useState<UploadState | null>(null)
+  const progressTimer = useRef<NodeJS.Timeout | null>(null)
 
-  const handleProgress: ProgressCallback = pct => {
-    setUpload(prev =>
-      prev
-        ? {
-            ...prev,
-            progress: pct,
-            status: pct >= 100 ? "processing" : "uploading",
-          }
-        : prev,
-    )
+  useEffect(() => {
+    return () => {
+      if (progressTimer.current) {
+        clearInterval(progressTimer.current)
+      }
+    }
+  }, [])
+
+  const startFakeProgress = () => {
+    if (progressTimer.current) clearInterval(progressTimer.current)
+    progressTimer.current = setInterval(() => {
+      setUpload(prev => {
+        if (!prev) return prev
+        if (prev.status === "done" || prev.status === "error") return prev
+        const nextProgress = Math.min(prev.progress + 5, 90)
+        return { ...prev, progress: nextProgress, status: "uploading" }
+      })
+    }, 400)
+  }
+
+  const stopFakeProgress = () => {
+    if (progressTimer.current) {
+      clearInterval(progressTimer.current)
+      progressTimer.current = null
+    }
   }
 
   const onDrop = useCallback(
@@ -41,34 +56,25 @@ export function FileUploader({ orgId, userId, categoryId, onUploadComplete }: Fi
       if (!acceptedFiles.length) return
       const file = acceptedFiles[0]
 
-      const fileType = detectType(file.type || "", file.name)
-      const path = generatePath(orgId, fileType, file.name)
-
       setUpload({
         fileName: file.name,
         progress: 0,
         status: "uploading",
       })
 
-      try {
-        const { url, path: storedPath } = await uploadToFirebase(file, path, handleProgress)
+      startFakeProgress()
 
-        // Save metadata to Supabase via /api/upload
+      try {
+        const formData = new FormData()
+        formData.append("file", file)
+        formData.append("orgId", orgId)
+        formData.append("categoryId", categoryId)
+        formData.append("userId", userId)
+        formData.append("title", file.name.replace(/\.[^/.]+$/, ""))
+
         const res = await fetch("/api/upload", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orgId,
-            categoryId,
-            userId,
-            title: file.name.replace(/\.[^/.]+$/, ""),
-            fileType,
-            fileName: file.name,
-            mimeType: file.type || null,
-            firebaseUrl: url,
-            firebasePath: storedPath,
-            fileSize: file.size,
-          }),
+          body: formData,
         })
 
         if (!res.ok) {
@@ -79,6 +85,7 @@ export function FileUploader({ orgId, userId, categoryId, onUploadComplete }: Fi
         const body = await res.json()
         const content = body.content ?? body
 
+        stopFakeProgress()
         setUpload(prev =>
           prev
             ? {
@@ -93,6 +100,7 @@ export function FileUploader({ orgId, userId, categoryId, onUploadComplete }: Fi
         onUploadComplete?.(content)
       } catch (e: any) {
         console.error("File upload error:", e)
+        stopFakeProgress()
         setUpload(prev =>
           prev
             ? {

@@ -5,8 +5,8 @@ import Groq from 'groq-sdk'
 import { getAccessibleCategoryIdsForUser } from '@/lib/category-access'
 import { randomUUID } from 'crypto'
 import { sanitizeObject } from '@/lib/sanitize'
-import { requireAuth } from '@/lib/api-auth'
-import { checkRateLimit } from '@/lib/rate-limit'
+import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
+import { aiChatLimiter } from '@/lib/rate-limiter'
 
 type ChatRequestBody = {
   question?: string
@@ -22,21 +22,24 @@ const groq = groqApiKey ? new Groq({ apiKey: groqApiKey }) : null
 
 export async function POST(req: NextRequest) {
   try {
+    const contentType = req.headers.get("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
+    }
+    const contentLength = Number(req.headers.get("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
     const authUser = await requireAuth(req)
     const body = sanitizeObject((await req.json()) as ChatRequestBody)
     const { question, userId, orgId, userRole, sessionId: incomingSessionId, categoryId } = body
     if (userId && authUser.id && userId !== authUser.id) {
       return NextResponse.json({ error: 'User mismatch' }, { status: 403 })
     }
-    const rate = checkRateLimit({
-      key: `ai-chat:${authUser.id}`,
-      limit: 20,
-      windowMs: 60 * 60 * 1000,
-    })
-    if (!rate.success) {
-      const res = NextResponse.json({ error: 'Too Many Requests' }, { status: 429 })
-      res.headers.set('Retry-After', String(rate.retryAfterSeconds))
-      return res
+    const limited = aiChatLimiter(`ai-chat:${authUser.id}`)
+    if (limited) return limited
+    if (orgId) {
+      await requireOrgMatch(authUser.id, orgId)
     }
 
     // 1. Validate inputs
@@ -456,7 +459,7 @@ ${context}`,
     console.error('chat route error:', e)
     return NextResponse.json(
       {
-        error: e instanceof Error ? e.message : 'Internal error',
+        error: 'An error occurred. Please try again.',
       },
       { status: 500 },
     )

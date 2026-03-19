@@ -31,14 +31,20 @@ function CoursePreview({
   fileUrl: string | null
   title: string
 }) {
-  if (type === "video" && fileUrl) {
+  const [previewFailed, setPreviewFailed] = useState(false)
+
+  if (type === "video" && fileUrl && !previewFailed) {
     return (
       <video
         src={fileUrl}
         className="w-full h-full object-cover"
         muted
+        autoPlay
+        loop
         playsInline
         preload="metadata"
+        poster={image ?? undefined}
+        onError={() => setPreviewFailed(true)}
         onLoadedMetadata={(e) => {
           const v = e.currentTarget
           if (!Number.isNaN(v.duration) && v.duration > 1) {
@@ -92,6 +98,7 @@ export default function LearnHomePage() {
     { id: string; title: string; category: string; duration: string; type: string }[]
   >([])
   const [error, setError] = useState<string | null>(null)
+  const [hasApprovedAccess, setHasApprovedAccess] = useState(false)
 
   useEffect(() => {
     const hour = new Date().getHours()
@@ -114,13 +121,13 @@ export default function LearnHomePage() {
 
         const [catsRes, contentRes] = await Promise.all([
           fetch(
-            `/api/categories?orgId=${encodedOrg}&userId=${encodedUserId}&userRole=${encodedRole}`,
+            `/api/categories?orgId=${encodedOrg}&userId=${encodedUserId}&userRole=${encodedRole}&enforceAccess=true`,
             {
               credentials: "include",
             },
           ),
           fetch(
-            `/api/content?orgId=${encodedOrg}&userId=${encodedUserId}&userRole=${encodedRole}`,
+            `/api/content?orgId=${encodedOrg}&userId=${encodedUserId}&userRole=${encodedRole}&enforceAccess=true`,
             {
               credentials: "include",
             },
@@ -140,6 +147,8 @@ export default function LearnHomePage() {
         const contentData = await contentRes.json()
 
         const catRows: any[] = catsData.categories ?? []
+        const hasAccess = catRows.length > 0
+        setHasApprovedAccess(hasAccess)
         const allowedCategoryIds = new Set<string>(catRows.map((c) => c.id as string))
 
         setCategories(
@@ -186,7 +195,10 @@ export default function LearnHomePage() {
             duration: c.duration_minutes ? `${c.duration_minutes} min` : "—",
             progress: 0,
             type: (c.type ?? "VIDEO").toLowerCase(),
-            image: (c.thumbnail_url as string | null) ?? null,
+            image:
+              (c.thumbnail_url as string | null) ??
+              (c.category_image as string | null) ??
+              null,
             fileUrl: (c.file_url as string | null) ?? null,
           })),
         )
@@ -203,13 +215,14 @@ export default function LearnHomePage() {
       } catch (e: any) {
         console.error(e)
         setError(e?.message || "Failed to load learning content.")
+        setHasApprovedAccess(false)
       } finally {
         setIsLoading(false)
       }
     }
 
     void load()
-  }, [user?.orgId])
+  }, [user?.orgId, user?.id, user?.role])
 
   if (isLoading) {
     return (
@@ -308,55 +321,75 @@ export default function LearnHomePage() {
           </AuroraBg>
         </motion.div>
 
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-bold text-[#1C1917]">Continue Learning</h3>
-            <Link href="/learn/browse" className="text-sm text-[#FF6B35] hover:underline">See all →</Link>
-          </div>
-          {error && continueCourses.length === 0 ? (
-            <p className="text-sm text-red-600">{error}</p>
-          ) : continueCourses.length === 0 ? (
-            <p className="text-sm text-[#78716C]">Training content is being prepared. Check back soon.</p>
-          ) : (
-            <div className="flex gap-4 overflow-x-auto pb-1 -mx-6 px-6" style={{ scrollSnapType: "x mandatory", scrollbarWidth: "none" }}>
-              {continueCourses.map((course, idx) => (
-                <Link key={course.id} href={`/learn/content/${course.id}`}>
-                  <motion.div
-                    className="flex-shrink-0 w-64 bg-white rounded-2xl border border-[#F0EDE8] overflow-hidden cursor-pointer"
-                    style={{ scrollSnapAlign: "start" }}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.1, ease: easeExpo }}
-                    whileHover={{ y: -4, boxShadow: "0 16px 48px rgba(0,0,0,0.1)", borderColor: "rgba(255,107,53,0.2)" }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <div className="h-36 relative overflow-hidden">
-                      <CoursePreview
-                        type={course.type}
-                        image={course.image}
-                        fileUrl={course.fileUrl}
-                        title={course.title}
-                      />
-                      <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.4) 100%)" }} />
-                      <span className="absolute bottom-3 left-3 px-2 py-1 rounded-md bg-black/30 backdrop-blur-sm text-white text-[10px] font-mono uppercase">
-                        {course.type}
-                      </span>
-                    </div>
-                    <div className="p-4">
-                      <span className="text-[11px] text-[#FF6B35] uppercase tracking-wide font-medium">{course.category}</span>
-                      <h4 className="mt-1 text-sm font-semibold text-[#1C1917] line-clamp-2">{course.title}</h4>
-                      <div className="mt-2 flex items-center gap-2 text-xs text-[#9CA3AF]">
-                        <span>{course.lessons} lessons</span>
-                        <span>•</span>
-                        <span>{course.duration}</span>
-                      </div>
-                    </div>
-                  </motion.div>
-                </Link>
-              ))}
+        {!hasApprovedAccess ? (
+          <section className="rounded-2xl border border-[#F0EDE8] bg-white p-6 text-center">
+            <h3 className="text-lg font-bold text-[#1C1917]">No Approved Categories Yet</h3>
+            <p className="mt-2 text-sm text-[#78716C]">
+              Request access from Categories. Once admin approves a category, your learning modules
+              will appear in Continue Learning.
+            </p>
+            <Link href="/learn/categories">
+              <motion.button
+                className="mt-4 inline-flex h-10 items-center gap-2 rounded-full bg-gradient-to-r from-[#FF6B35] to-[#E85520] px-5 text-sm font-bold text-white shadow-lg shadow-[#FF6B35]/30"
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                Explore Categories
+                <ArrowRight size={15} />
+              </motion.button>
+            </Link>
+          </section>
+        ) : (
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-[#1C1917]">Continue Learning</h3>
+              <Link href="/learn/browse" className="text-sm text-[#FF6B35] hover:underline">See all →</Link>
             </div>
-          )}
-        </section>
+            {error && continueCourses.length === 0 ? (
+              <p className="text-sm text-red-600">{error}</p>
+            ) : continueCourses.length === 0 ? (
+              <p className="text-sm text-[#78716C]">No approved materials yet in your categories.</p>
+            ) : (
+              <div className="flex gap-4 overflow-x-auto pb-1 -mx-6 px-6" style={{ scrollSnapType: "x mandatory", scrollbarWidth: "none" }}>
+                {continueCourses.map((course, idx) => (
+                  <Link key={course.id} href={`/learn/content/${course.id}`}>
+                    <motion.div
+                      className="flex-shrink-0 w-64 bg-white rounded-2xl border border-[#F0EDE8] overflow-hidden cursor-pointer"
+                      style={{ scrollSnapAlign: "start" }}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.1, ease: easeExpo }}
+                      whileHover={{ y: -4, boxShadow: "0 16px 48px rgba(0,0,0,0.1)", borderColor: "rgba(255,107,53,0.2)" }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <div className="h-36 relative overflow-hidden">
+                        <CoursePreview
+                          type={course.type}
+                          image={course.image}
+                          fileUrl={course.fileUrl}
+                          title={course.title}
+                        />
+                        <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.4) 100%)" }} />
+                        <span className="absolute bottom-3 left-3 px-2 py-1 rounded-md bg-black/30 backdrop-blur-sm text-white text-[10px] font-mono uppercase">
+                          {course.type}
+                        </span>
+                      </div>
+                      <div className="p-4">
+                        <span className="text-[11px] text-[#FF6B35] uppercase tracking-wide font-medium">{course.category}</span>
+                        <h4 className="mt-1 text-sm font-semibold text-[#1C1917] line-clamp-2">{course.title}</h4>
+                        <div className="mt-2 flex items-center gap-2 text-xs text-[#9CA3AF]">
+                          <span>{course.lessons} lessons</span>
+                          <span>•</span>
+                          <span>{course.duration}</span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         <section>
           <div className="flex items-center justify-between mb-4">

@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { createEmbedding, chunkText, extractText } from '@/lib/openai'
+import { requireAdmin, requireOrgMatch } from '@/lib/api-auth'
+import { sanitizeObject } from '@/lib/sanitize'
 
 type EmbedRequestBody = {
   contentId?: string
@@ -15,12 +17,22 @@ const BATCH_DELAY_MS = 300
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as EmbedRequestBody
+    const auth = await requireAdmin(req)
+    const contentType = req.headers.get("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
+    }
+    const contentLength = Number(req.headers.get("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
+    const body = sanitizeObject((await req.json()) as EmbedRequestBody)
     const { contentId, fileUrl, orgId, fileName, mimeType } = body
 
     if (!contentId || !orgId) {
       return NextResponse.json({ error: 'Missing contentId or orgId' }, { status: 400 })
     }
+    await requireOrgMatch(auth.id, orgId)
 
     // 1. Get content record for mime type + filename
     const { data: content, error: contentError } = await supabaseAdmin
@@ -38,15 +50,25 @@ export async function POST(req: NextRequest) {
     const name = fileName ?? `${(content.type as string | null)?.toLowerCase() || 'file'}`
 
     // 2. Build source text
-    const contentType = String((content.type as string | null) || '').toUpperCase()
+    const lessonType = String((content.type as string | null) || '').toUpperCase()
     let text = ''
-    if (contentType === 'VIDEO') {
+    if (lessonType === 'VIDEO') {
       const title = String((content.title as string | null) || '').trim()
       const description = String((content.description as string | null) || '').trim()
       text = [title, description].filter(Boolean).join('\n\n')
     } else if (fileUrl) {
       // For file lessons, fetch file and extract text.
-      const res = await fetch(fileUrl)
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30_000)
+      const res = await fetch(fileUrl, { signal: controller.signal }).catch((e) => {
+        console.error("embed: file fetch error", e)
+        return null as any
+      })
+      clearTimeout(timeout)
+      if (!res || !res.ok) {
+        console.error('embed: failed to fetch file', res?.status, res?.statusText)
+        return NextResponse.json({ error: 'Failed to fetch file' }, { status: 400 })
+      }
       if (!res.ok) {
         console.error('embed: failed to fetch file', res.status, res.statusText)
         return NextResponse.json({ error: 'Failed to fetch file' }, { status: 400 })
@@ -143,7 +165,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ chunksCreated: chunks.length })
   } catch (e) {
     console.error('embed route error:', e)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 

@@ -14,6 +14,12 @@ function withSecurityHeaders(res: NextResponse): NextResponse {
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const isApi = pathname.startsWith('/api/')
+  const isUploadApi =
+    pathname === '/api/upload' ||
+    pathname.startsWith('/api/upload/') ||
+    pathname === '/api/company-docs' ||
+    pathname.startsWith('/api/company-docs/')
+  const isCategoryApi = pathname === '/api/categories' || pathname.startsWith('/api/categories/')
 
   if (SUSPICIOUS_URL_PATTERN.test(request.nextUrl.href)) {
     console.warn('[security] blocked suspicious URL', request.nextUrl.href)
@@ -23,7 +29,12 @@ export function middleware(request: NextRequest) {
   }
 
   const contentLength = Number(request.headers.get('content-length') || '0')
-  if (contentLength > 10 * 1024) {
+  const maxContentLength = isUploadApi
+    ? 600 * 1024 * 1024
+    : isCategoryApi
+      ? 25 * 1024 * 1024
+      : 1 * 1024 * 1024
+  if (contentLength > maxContentLength) {
     return withSecurityHeaders(
       NextResponse.json({ error: 'Payload too large.' }, { status: 413 }),
     )

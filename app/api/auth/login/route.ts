@@ -1,17 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase"
 import { sanitizeObject, validateEmail } from "@/lib/sanitize"
-import { checkRateLimit, getIpFromRequestHeaders } from "@/lib/rate-limit"
+import { getClientIp, loginLimiter } from "@/lib/rate-limiter"
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = getIpFromRequestHeaders(req.headers)
-    const limit = checkRateLimit({ key: `login:${ip}`, limit: 10, windowMs: 15 * 60 * 1000 })
-    if (!limit.success) {
-      const res = NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
-      res.headers.set("Retry-After", String(limit.retryAfterSeconds))
-      return res
+    const contentType = req.headers.get("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
     }
+    const contentLength = Number(req.headers.get("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
+    const ip = getClientIp(req.headers)
+    const limited = loginLimiter(`login:${ip}`)
+    if (limited) return limited
 
     const body = sanitizeObject((await req.json().catch(() => null)) ?? {})
     const email = body?.email?.toString().trim().toLowerCase()
@@ -19,12 +23,12 @@ export async function POST(req: NextRequest) {
 
     if (!email || !password) {
       return NextResponse.json(
-        { error: "Email and password are required." },
+        { error: "Invalid email or password." },
         { status: 400 },
       )
     }
     if (!validateEmail(email)) {
-      return NextResponse.json({ error: "Invalid email format." }, { status: 400 })
+      return NextResponse.json({ error: "Invalid email or password." }, { status: 401 })
     }
 
     const { data: authData, error: authError } =
@@ -32,7 +36,7 @@ export async function POST(req: NextRequest) {
 
     if (authError || !authData.user) {
       return NextResponse.json(
-        { error: authError?.message || "Invalid email or password." },
+        { error: "Invalid email or password." },
         { status: 401 },
       )
     }
@@ -46,8 +50,8 @@ export async function POST(req: NextRequest) {
     if (profileError || !profile) {
       console.error("[login] profile query error:", profileError?.message)
       return NextResponse.json(
-        { error: "Profile not found. Please contact support." },
-        { status: 404 },
+        { error: "Invalid email or password." },
+        { status: 401 },
       )
     }
 
@@ -86,17 +90,16 @@ export async function POST(req: NextRequest) {
     if (profile.status === "pending") {
       return NextResponse.json(
         {
-          error:
-            "Your account is pending approval. Please wait for an administrator to approve your registration.",
+          error: "Invalid email or password.",
         },
-        { status: 403 },
+        { status: 401 },
       )
     }
 
     if (profile.status === "inactive") {
       return NextResponse.json(
-        { error: "Your account has been deactivated. Please contact your administrator." },
-        { status: 403 },
+        { error: "Invalid email or password." },
+        { status: 401 },
       )
     }
 
@@ -119,7 +122,7 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     console.error("login route error:", e)
     return NextResponse.json(
-      { error: "Internal server error." },
+      { error: "An error occurred. Please try again." },
       { status: 500 },
     )
   }

@@ -1,7 +1,20 @@
 import { NextResponse } from "next/server"
-import { getAdminStorage } from "@/lib/firebase-admin"
+import { v2 as cloudinary } from "cloudinary"
 
-const BUCKET_NAME = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "arambh-prod.appspot.com"
+const CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME
+const API_KEY = process.env.CLOUDINARY_API_KEY
+const API_SECRET = process.env.CLOUDINARY_API_SECRET
+
+if (!CLOUD_NAME || !API_KEY || !API_SECRET) {
+  console.warn("Cloudinary env vars missing for category image upload route.")
+}
+
+cloudinary.config({
+  cloud_name: CLOUD_NAME,
+  api_key: API_KEY,
+  api_secret: API_SECRET,
+  secure: true,
+})
 
 export async function POST(req: Request) {
   try {
@@ -23,39 +36,35 @@ export async function POST(req: Request) {
       )
     }
 
-    const storage = getAdminStorage()
-    const bucket = storage.bucket(BUCKET_NAME)
+    const bytes = await file.arrayBuffer()
+    const buffer = Buffer.from(bytes)
 
     const ts = Date.now()
     const clean = file.name.toLowerCase().replace(/[^a-z0-9.]/g, "-").replace(/-+/g, "-")
-    const storagePath = `orgs/${orgId}/categories/${ts}-${clean}`
-    const fileRef = bucket.file(storagePath)
+    const publicId = `orgs/${orgId}/categories/${ts}-${clean}`.replace(/\.[^.]+$/, "")
 
-    const buffer = Buffer.from(await file.arrayBuffer())
-
-    await fileRef.save(buffer, {
-      metadata: {
-        contentType: file.type || "image/jpeg",
-      },
+    const result = await new Promise<cloudinary.UploadApiResponse>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: undefined,
+          public_id: publicId,
+          resource_type: "image",
+        },
+        (error, res) => {
+          if (error || !res) return reject(error)
+          resolve(res)
+        },
+      )
+      stream.end(buffer)
     })
 
-    await fileRef.makePublic()
-
-    const publicUrl = `https://storage.googleapis.com/${BUCKET_NAME}/${storagePath}`
-
     return NextResponse.json({
-      imageUrl: publicUrl,
+      imageUrl: result.secure_url,
       orgId,
     })
   } catch (e: any) {
-    console.error("Firebase Admin category upload error:", e)
+    console.error("Cloudinary category upload error:", e)
     const message = e?.message || "Upload failed"
-    if (message.includes("bucket does not exist")) {
-      return NextResponse.json(
-        { error: `Firebase Storage bucket '${BUCKET_NAME}' not found. Go to Firebase Console > Storage and enable it.` },
-        { status: 500 },
-      )
-    }
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

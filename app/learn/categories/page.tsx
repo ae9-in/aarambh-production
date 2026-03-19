@@ -82,7 +82,7 @@ export default function CategoriesPage() {
         }
 
         const res = await fetch(
-          `/api/categories?orgId=${user.orgId}&userId=${user.id}&userRole=${user.role}`
+          `/api/categories?orgId=${user.orgId}&userId=${user.id}&userRole=${user.role}&enforceAccess=true`
         )
         
         const data = await res.json()

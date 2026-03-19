@@ -25,8 +25,12 @@ interface Content {
   id: string
   title: string
   description: string | null
+  task_text?: string | null
   type: string
   file_url: string | null
+  fallback_file_url?: string | null
+  thumbnail_url?: string | null
+  category_image?: string | null
   xp_reward: number | null
   duration_minutes: number | null
   category_id: string | null
@@ -61,6 +65,24 @@ interface MaterialItem {
   file_url: string | null
 }
 
+function getDocumentViewerUrl(fileUrl: string, type?: string): string {
+  const upperType = String(type || "").toUpperCase()
+  const lowerUrl = fileUrl.toLowerCase()
+
+  if (upperType === "PDF" || lowerUrl.endsWith(".pdf")) {
+    return fileUrl
+  }
+
+  // Office viewer works for ppt/pptx/doc/docx/xls/xlsx and many common formats.
+  const officeExtensions = [".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx"]
+  if (officeExtensions.some((ext) => lowerUrl.includes(ext))) {
+    return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`
+  }
+
+  // Fallback viewer for other raw docs.
+  return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(fileUrl)}`
+}
+
 export default function LessonPage() {
   const { user } = useAuth()
   const [contentId, setContentId] = useState<string | null>(null)
@@ -78,6 +100,10 @@ export default function LessonPage() {
   const [videoProgress, setVideoProgress] = useState(0)
   const [showXpAnimation, setShowXpAnimation] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
+  const [videoLoadFailed, setVideoLoadFailed] = useState(false)
+  const [videoSrc, setVideoSrc] = useState<string | null>(null)
+  const [triedFallbackSource, setTriedFallbackSource] = useState(false)
+  const [isDocumentViewerOpen, setIsDocumentViewerOpen] = useState(false)
 
   // Quiz state
   const [showQuiz, setShowQuiz] = useState(false)
@@ -103,10 +129,15 @@ export default function LessonPage() {
     const loadData = async () => {
       try {
         setLoading(true)
-        const res = await fetch(`/api/content/${contentId}?userId=${user.id}`)
+        setVideoLoadFailed(false)
+        setVideoSrc(null)
+        setTriedFallbackSource(false)
+        setIsDocumentViewerOpen(false)
+        const res = await fetch(`/api/content/${contentId}`)
         if (!res.ok) throw new Error("Failed to load content")
         const data = await res.json()
         setContent(data.content)
+        setVideoSrc(data?.content?.file_url ?? null)
         setProgress(data.progress)
         setMaterials(data.materials || [])
 
@@ -284,6 +315,20 @@ export default function LessonPage() {
 
   const isCompleted = (progress?.status || "").toUpperCase() === "COMPLETED"
   const isVideo = content?.type?.toUpperCase() === "VIDEO"
+  const docUrl = content?.file_url || content?.fallback_file_url || null
+  const isPdf = content?.type?.toUpperCase() === "PDF"
+  const downloadUrl = content?.id ? `/api/content/${content.id}/document?download=1` : (docUrl || "#")
+  const docViewerUrl =
+    isPdf && content?.id
+      ? `/api/content/${content.id}/document`
+      : docUrl
+        ? getDocumentViewerUrl(docUrl, content?.type)
+        : null
+  const isDocumentFocusedMode = !isVideo && !!docViewerUrl && isDocumentViewerOpen
+  const primaryTaskText =
+    content?.task_text?.trim() ||
+    (isVideo ? "Watch the video" : `Complete this ${content?.type?.toLowerCase() || "lesson"} module`)
+  const primaryTaskCompleted = isVideo ? videoProgress >= 90 : isCompleted
 
   if (loading) {
     return (
@@ -333,13 +378,13 @@ export default function LessonPage() {
       {/* Two Panel Layout */}
       <div className="max-w-7xl mx-auto flex flex-col lg:flex-row">
         {/* Left Panel - Video (60%) */}
-        <div className="lg:w-[60%] bg-[#0a0a0a]">
-          {isVideo && content.file_url ? (
+        <div className={`${isDocumentFocusedMode ? "w-full" : "lg:w-[60%]"} bg-[#0a0a0a]`}>
+          {isVideo && videoSrc && !videoLoadFailed ? (
             <div className="relative aspect-video bg-[#0a0a0a]">
               <video
                 ref={videoRef}
                 className="w-full h-full"
-                src={content.file_url}
+                src={videoSrc}
                 onTimeUpdate={handleTimeUpdate}
                 onEnded={handleVideoEnded}
                 onPlay={() => setIsPlaying(true)}
@@ -347,6 +392,15 @@ export default function LessonPage() {
                 controls
                 playsInline
                 style={{ aspectRatio: "16/9" }}
+                onError={() => {
+                  const fallbackUrl = content.fallback_file_url || null
+                  if (!triedFallbackSource && fallbackUrl && fallbackUrl !== videoSrc) {
+                    setTriedFallbackSource(true)
+                    setVideoSrc(fallbackUrl)
+                    return
+                  }
+                  setVideoLoadFailed(true)
+                }}
               />
               <div className="absolute left-3 bottom-3 z-10 flex items-center gap-2 rounded-lg bg-black/60 px-2 py-1.5 text-white">
                 <button onClick={() => seekBy(-10)} className="hover:text-[#FF6B35]" title="Rewind 10s">
@@ -375,23 +429,54 @@ export default function LessonPage() {
                 </button>
               </div>
             </div>
-          ) : content.file_url ? (
-            <div className="aspect-video bg-[#1C1917] flex items-center justify-center">
-              <div className="text-center text-white">
-                <div className="w-16 h-16 rounded-full bg-[#FF6B35]/20 flex items-center justify-center mx-auto mb-4">
-                  <Play size={24} className="text-[#FF6B35]" />
+          ) : docViewerUrl ? (
+            <div className="relative h-[82vh] min-h-[620px] bg-[#1C1917]">
+              {isDocumentViewerOpen ? (
+                <>
+                  <div className="absolute top-3 right-3 z-20">
+                    <a
+                      href={downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg bg-[#FF6B35] px-4 py-2 text-sm font-medium text-white hover:bg-[#E55A24]"
+                    >
+                      <ExternalLink size={14} />
+                      Download
+                    </a>
+                  </div>
+                  <iframe
+                    src={docViewerUrl}
+                    title={content.title}
+                    className="h-full w-full border-0"
+                    allowFullScreen
+                  />
+                </>
+              ) : (
+                <div className="h-full w-full flex items-center justify-center">
+                  <div className="text-center text-white">
+                    <p className="mb-4 text-lg">{isPdf ? "PDF Lesson" : "Document Lesson"}</p>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsDocumentViewerOpen(true)}
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-[#FF6B35] rounded-xl font-medium hover:bg-[#E55A24] transition-colors"
+                      >
+                        <Play size={18} />
+                        {isPdf ? "Open PDF" : "Open Document"}
+                      </button>
+                      <a
+                        href={downloadUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-white/15 rounded-xl font-medium hover:bg-white/25 transition-colors"
+                      >
+                        <ExternalLink size={18} />
+                        Download
+                      </a>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-lg mb-4">Document Lesson</p>
-                <a
-                  href={content.file_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-[#FF6B35] rounded-xl font-medium hover:bg-[#E55A24] transition-colors"
-                >
-                  <Play size={18} />
-                  Open Content
-                </a>
-              </div>
+              )}
             </div>
           ) : (
             <div className="aspect-video bg-[#1C1917] flex items-center justify-center">
@@ -401,7 +486,7 @@ export default function LessonPage() {
         </div>
 
         {/* Right Panel - Info (40%) */}
-        <div className="lg:w-[40%] bg-white border-l border-[#E7E5E4]">
+        <div className={`${isDocumentFocusedMode ? "hidden" : "lg:w-[40%]"} bg-white border-l border-[#E7E5E4]`}>
           <div className="p-6">
             {/* Title */}
             <h1 className="text-xl font-bold text-[#1C1917] mb-2">{content.title}</h1>
@@ -424,11 +509,11 @@ export default function LessonPage() {
               <h3 className="text-sm font-semibold text-[#1C1917] mb-3">Tasks</h3>
               <div className="space-y-2">
                 <div className="flex items-center gap-3 p-3 rounded-lg bg-[#FAF9F7]">
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center ${videoProgress >= 90 ? "bg-[#10B981]" : "bg-[#E7E5E4]"}`}>
-                    {videoProgress >= 90 ? <CheckCircle2 size={12} className="text-white" /> : <span className="text-xs text-[#78716C]">1</span>}
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center ${primaryTaskCompleted ? "bg-[#10B981]" : "bg-[#E7E5E4]"}`}>
+                    {primaryTaskCompleted ? <CheckCircle2 size={12} className="text-white" /> : <span className="text-xs text-[#78716C]">1</span>}
                   </div>
-                  <span className={`text-sm ${videoProgress >= 90 ? "text-[#10B981] line-through" : "text-[#1C1917]"}`}>
-                    Watch the video
+                  <span className={`text-sm ${primaryTaskCompleted ? "text-[#10B981] line-through" : "text-[#1C1917]"}`}>
+                    {primaryTaskText}
                   </span>
                 </div>
                 {quiz && quiz.questions.length > 0 && (

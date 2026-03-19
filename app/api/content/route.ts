@@ -2,15 +2,15 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAccessibleCategoryIdsForUser } from '@/lib/category-access'
 import { sanitizeObject } from '@/lib/sanitize'
-import { requireAuth } from '@/lib/api-auth'
+import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
 
 export async function GET(req: NextRequest) {
-  await requireAuth(req)
+  const auth = await requireAuth(req)
   const { searchParams } = new URL(req.url)
 
   const orgId = searchParams.get('orgId')
-  const userId = searchParams.get('userId')
   const userRole = searchParams.get('userRole')
+  const enforceAccess = searchParams.get('enforceAccess') === 'true'
   const categoryId = searchParams.get('categoryId')
   const type = searchParams.get('type')
   const search = searchParams.get('search')
@@ -18,13 +18,14 @@ export async function GET(req: NextRequest) {
   if (!orgId) {
     return NextResponse.json({ error: 'Missing orgId' }, { status: 400 })
   }
+  await requireOrgMatch(auth.id, orgId)
 
   let query = supabaseAdmin
     .from('content')
     .select(
       `
       *,
-      categories(name),
+      categories(name,icon),
       uploader:profiles!content_uploaded_by_fkey(name)
     `,
       { count: 'exact' },
@@ -44,8 +45,15 @@ export async function GET(req: NextRequest) {
     query = query.ilike('title', `%${search}%`)
   }
 
-  if (userId && userRole) {
-    const accessibleCategoryIds = await getAccessibleCategoryIdsForUser(orgId, userId, userRole)
+  const effectiveUserId = auth.id
+  const effectiveUserRole = auth.role || userRole || 'EMPLOYEE'
+
+  if (enforceAccess && effectiveUserId) {
+    const accessibleCategoryIds = await getAccessibleCategoryIdsForUser(
+      orgId,
+      effectiveUserId,
+      effectiveUserRole,
+    )
     if (accessibleCategoryIds.length === 0) {
       return NextResponse.json({ content: [], count: 0 }, { status: 200 })
     }
@@ -61,12 +69,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to load content' }, { status: 500 })
   }
 
-  const content =
-    data?.map((item: any) => ({
+  const content = await Promise.all(
+    (data ?? []).map(async (item: any) => ({
       ...item,
       category_name: item.categories?.name ?? null,
+      category_image: item.categories?.icon ?? null,
       uploader_name: item.uploader?.name ?? null,
-    })) ?? []
+    })),
+  )
 
   return NextResponse.json(
     {
@@ -79,7 +89,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await requireAuth(req)
+    const auth = await requireAuth(req)
+    const contentType = req.headers.get("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
+    }
+    const contentLength = Number(req.headers.get("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
     const body = sanitizeObject(await req.json())
     const {
       orgId,
@@ -105,6 +123,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       )
     }
+    await requireOrgMatch(auth.id, orgId)
 
     const { data, error } = await supabaseAdmin
       .from('content')
@@ -146,7 +165,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ content: data }, { status: 201 })
   } catch (e) {
     console.error('content POST error:', e)
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 

@@ -25,7 +25,11 @@ export function VideoPlayer({
   lastPositionSeconds = 0,
   onProgress,
   onComplete,
-}: VideoPlayerProps) {
+  }: VideoPlayerProps) {
+  const transformedUrl =
+    url && url.includes("res.cloudinary.com") && url.includes("/upload/")
+      ? url.replace("/upload/", "/upload/q_auto,f_auto/")
+      : url
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
@@ -203,7 +207,8 @@ export function VideoPlayer({
         <video
           ref={videoRef}
           className="h-full w-full object-cover"
-          src={url}
+          src={transformedUrl}
+          preload="metadata"
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={() => {

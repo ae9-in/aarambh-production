@@ -1,11 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getAdminStorage } from '@/lib/firebase-admin'
 import { getAccessibleCategoryIdsForUser } from '@/lib/category-access'
 import { sanitizeObject } from '@/lib/sanitize'
-import { requireAuth } from '@/lib/api-auth'
-
-const BUCKET_NAME = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'arambh-prod.appspot.com'
+import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
+import { deleteFromCloudinary } from '@/lib/cloudinary'
 
 type RouteParams = {
   params: Promise<{
@@ -14,19 +12,18 @@ type RouteParams = {
 }
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
-  await requireAuth(req)
+  const auth = await requireAuth(req)
   const { id } = await params
-  const { searchParams } = new URL(req.url)
-  const userId = searchParams.get('userId')
-
-  if (!userId) {
-    return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
-  }
+  const effectiveUserId = auth.id
 
   const {
     data: content,
     error: contentError,
-  } = await supabaseAdmin.from('content').select('*').eq('id', id).single()
+  } = await supabaseAdmin
+    .from('content')
+    .select('*, categories(name,icon)')
+    .eq('id', id)
+    .single()
 
   if (contentError || !content) {
     console.error('content fetch error:', contentError)
@@ -37,13 +34,14 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const { data: profile } = await supabaseAdmin
     .from('profiles')
     .select('role')
-    .eq('id', userId)
+    .eq('id', effectiveUserId)
     .maybeSingle()
 
   if ((content as any).org_id && (content as any).category_id && profile?.role) {
+    await requireOrgMatch(auth.id, String((content as any).org_id))
     const allowedCategoryIds = await getAccessibleCategoryIdsForUser(
       String((content as any).org_id),
-      userId,
+      effectiveUserId,
       String(profile.role),
     )
     if (!allowedCategoryIds.includes(String((content as any).category_id))) {
@@ -57,7 +55,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   } = await supabaseAdmin
     .from('user_progress')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id', effectiveUserId)
     .eq('content_id', id)
     .maybeSingle()
 
@@ -73,7 +71,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
   const accessLogPromise = supabaseAdmin.from('access_logs').insert({
     action: 'VIEW',
-    user_id: userId,
+    user_id: effectiveUserId,
     content_id: id,
   })
 
@@ -118,11 +116,24 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     console.error('view side effects error:', e)
   })
 
+  const resolvedContent = {
+    ...content,
+    fallback_file_url: (content as any).file_url,
+    file_url: (content as any).file_url,
+    category_image: (content as any)?.categories?.icon ?? null,
+  }
+  const resolvedMaterials = await Promise.all(
+    (materials ?? []).map(async (m: any) => ({
+      ...m,
+      file_url: m.file_url,
+    })),
+  )
+
   return NextResponse.json(
     {
-      content,
+      content: resolvedContent,
       progress: userProgress ?? null,
-      materials,
+      materials: resolvedMaterials,
       quiz,
     },
     { status: 200 },
@@ -130,10 +141,18 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 }
 
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
-  await requireAuth(req)
+  const auth = await requireAuth(req)
   const { id } = await params
 
   try {
+    const contentType = req.headers.get("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
+    }
+    const contentLength = Number(req.headers.get("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
     const body = sanitizeObject(await req.json())
     const {
       title,
@@ -160,6 +179,10 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
     }
+    const { data: existing } = await supabaseAdmin.from("content").select("org_id").eq("id", id).maybeSingle()
+    if (existing?.org_id) {
+      await requireOrgMatch(auth.id, String(existing.org_id))
+    }
 
     const { data, error } = await supabaseAdmin
       .from('content')
@@ -176,12 +199,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ content: data }, { status: 200 })
   } catch (e) {
     console.error('content PATCH error:', e)
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 
 export async function DELETE(_req: NextRequest, { params }: RouteParams) {
-  await requireAuth(_req)
+  const auth = await requireAuth(_req)
   const { id } = await params
 
   const {
@@ -189,7 +212,7 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
     error: contentError,
   } = await supabaseAdmin
     .from('content')
-    .select('id, firebase_path')
+    .select('id, cloudinary_public_id, cloudinary_resource_type, org_id')
     .eq('id', id)
     .single()
 
@@ -197,15 +220,19 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
     console.error('content fetch before delete error:', contentError)
     return NextResponse.json({ error: 'Content not found' }, { status: 404 })
   }
+  if ((content as any).org_id) {
+    await requireOrgMatch(auth.id, String((content as any).org_id))
+  }
 
-  const storedPath = (content as any).firebase_path as string | null
+  const publicId = (content as any).cloudinary_public_id as string | null
+  const resourceType = ((content as any).cloudinary_resource_type as
+    | 'image'
+    | 'video'
+    | 'raw'
+    | null) ?? 'raw'
 
-  if (storedPath) {
-    const storage = getAdminStorage()
-    const bucket = storage.bucket(BUCKET_NAME)
-    bucket.file(storedPath).delete().catch((e) => {
-      console.error("Firebase Admin delete error:", e)
-    })
+  if (publicId) {
+    void deleteFromCloudinary(publicId, resourceType)
   }
 
   const { error: deleteError } = await supabaseAdmin.from('content').delete().eq('id', id)

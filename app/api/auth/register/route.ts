@@ -2,22 +2,61 @@ import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { supabaseAdmin } from "@/lib/supabase"
 import { sanitizeObject, validateEmail } from "@/lib/sanitize"
-import { checkRateLimit, getIpFromRequestHeaders } from "@/lib/rate-limit"
+import { getClientIp, registerLimiter } from "@/lib/rate-limiter"
 
 function toRoleKey(value?: string | null) {
   if (!value) return null
   return value.trim().toUpperCase().replace(/\s+/g, "_")
 }
 
+function emailDomain(email: string): string {
+  const parts = String(email || "").toLowerCase().split("@")
+  return parts.length === 2 ? parts[1] : ""
+}
+
+async function inferOrgIdFromEmailDomain(email: string): Promise<string | null> {
+  const domain = emailDomain(email)
+  if (!domain) return null
+
+  const { data: orgProfiles, error } = await supabaseAdmin
+    .from("profiles")
+    .select("org_id,email,role,status")
+    .not("org_id", "is", null)
+    .eq("status", "active")
+    .in("role", ["SUPER_ADMIN", "ADMIN", "MANAGER"])
+
+  if (error || !orgProfiles || orgProfiles.length === 0) {
+    return null
+  }
+
+  const matchedOrgIds = new Set<string>()
+  for (const row of orgProfiles as any[]) {
+    const rowDomain = emailDomain(String(row.email || ""))
+    if (rowDomain && rowDomain === domain && row.org_id) {
+      matchedOrgIds.add(String(row.org_id))
+    }
+  }
+
+  // Use inferred org only when there is a single unambiguous match.
+  if (matchedOrgIds.size === 1) {
+    return Array.from(matchedOrgIds)[0]
+  }
+  return null
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const ip = getIpFromRequestHeaders(req.headers)
-    const limit = checkRateLimit({ key: `register:${ip}`, limit: 3, windowMs: 60 * 60 * 1000 })
-    if (!limit.success) {
-      const res = NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
-      res.headers.set("Retry-After", String(limit.retryAfterSeconds))
-      return res
+    const contentType = req.headers.get("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
     }
+    const contentLength = Number(req.headers.get("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
+    const ip = getClientIp(req.headers)
+    const limited = registerLimiter(`register:${ip}`)
+    if (limited) return limited
 
     const body = sanitizeObject((await req.json().catch(() => null)) ?? {})
     const name = body?.name?.toString().trim()
@@ -119,6 +158,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Ensure profile exists (trigger may have created it or not)
+    const inferredOrgId = await inferOrgIdFromEmailDomain(email)
     const { data: existingNewProfile } = await supabaseAdmin
       .from("profiles")
       .select("id")
@@ -127,7 +167,7 @@ export async function POST(req: NextRequest) {
 
     if (!existingNewProfile) {
       // Trigger didn't create it — insert manually
-      await supabaseAdmin.from("profiles").insert({
+      const { error: insertErr } = await supabaseAdmin.from("profiles").insert({
         id: userId,
         email,
         name,
@@ -135,34 +175,97 @@ export async function POST(req: NextRequest) {
         status: "pending",
         department,
         phone,
+        org_id: inferredOrgId,
       })
+      if (insertErr) {
+        // Retry without optional columns if schema is behind.
+        const fallbackPayload: Record<string, unknown> = {
+          id: userId,
+          email,
+          name,
+          role: "EMPLOYEE",
+          status: "pending",
+          org_id: inferredOrgId,
+        }
+        const { error: fallbackErr } = await supabaseAdmin.from("profiles").insert(fallbackPayload)
+        if (fallbackErr) {
+          console.error("register: failed to create profile row:", fallbackErr)
+          return NextResponse.json(
+            { error: "Account created, but profile setup failed. Please contact admin." },
+            { status: 500 },
+          )
+        }
+      }
     } else {
       // Trigger created it — update with our fields
-      await supabaseAdmin
+      const { error: updateErr } = await supabaseAdmin
         .from("profiles")
-        .update({ status: "pending", department, phone, name })
+        .update({
+          status: "pending",
+          department,
+          phone,
+          name,
+          ...(inferredOrgId ? { org_id: inferredOrgId } : {}),
+        })
         .eq("id", userId)
+      if (updateErr) {
+        // Retry with required fields only.
+        const { error: fallbackUpdateErr } = await supabaseAdmin
+          .from("profiles")
+          .update({
+            status: "pending",
+            name,
+            ...(inferredOrgId ? { org_id: inferredOrgId } : {}),
+          })
+          .eq("id", userId)
+        if (fallbackUpdateErr) {
+          console.error("register: failed to update profile row:", fallbackUpdateErr)
+          return NextResponse.json(
+            { error: "Account created, but profile update failed. Please contact admin." },
+            { status: 500 },
+          )
+        }
+      }
     }
 
     // Notify admins (best-effort)
     try {
+      const { data: createdProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("org_id")
+        .eq("id", userId)
+        .maybeSingle()
+      const orgId = (createdProfile?.org_id as string | null) ?? inferredOrgId
+
       const { data: admins } = await supabaseAdmin
         .from("profiles")
         .select("id, org_id")
         .in("role", ["SUPER_ADMIN", "ADMIN", "MANAGER"])
         .eq("status", "active")
+        .eq("org_id", orgId ?? "")
         .limit(5)
 
-      if (admins && admins.length > 0) {
-        const notifications = admins.map((a: any) => ({
-          user_id: a.id,
-          org_id: a.org_id,
-          type: "system",
-          title: `New Registration: ${name}`,
-          message: `${email} has registered and is waiting for approval.`,
-          action_url: "/dashboard/users/approval",
-        }))
-        await supabaseAdmin.from("notifications").insert(notifications)
+      const fallbackAdmins = (!admins || admins.length === 0)
+        ? await supabaseAdmin
+            .from("profiles")
+            .select("id, org_id")
+            .in("role", ["SUPER_ADMIN", "ADMIN", "MANAGER"])
+            .eq("status", "active")
+            .limit(5)
+        : null
+      const targetAdmins = admins && admins.length > 0 ? admins : (fallbackAdmins?.data || [])
+
+      if (targetAdmins.length > 0) {
+        await supabaseAdmin.from("notifications").insert(
+          targetAdmins.map((a: any) => ({
+            user_id: a.id,
+            org_id: a.org_id,
+            type: "system",
+            title: `New Registration: ${name}`,
+            message: `${email} has registered and is waiting for approval.`,
+            action_url: "/dashboard/users/approval",
+          })),
+        )
       }
     } catch {
       // best-effort
@@ -235,7 +338,7 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     console.error("register route error:", e)
     return NextResponse.json(
-      { error: "Internal server error." },
+      { error: "An error occurred. Please try again." },
       { status: 500 },
     )
   }

@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
 
 type Period = 'week' | 'month' | 'allTime'
 
 export async function GET(req: Request) {
   try {
+    const auth = await requireAuth(req as any)
     const { searchParams } = new URL(req.url)
     const orgId = searchParams.get('orgId')
     const period = (searchParams.get('period') || 'allTime') as Period
@@ -12,6 +14,7 @@ export async function GET(req: Request) {
     if (!orgId) {
       return NextResponse.json({ error: 'Missing orgId' }, { status: 400 })
     }
+    await requireOrgMatch(auth.id, orgId)
 
     const field =
       period === 'week' ? 'weekly_xp' : period === 'month' ? 'monthly_xp' : 'xp_points'
@@ -48,7 +51,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ leaderboard })
   } catch (e) {
     console.error('GET /api/leaderboard unexpected:', e)
-    return NextResponse.json({ error: 'Unexpected error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 

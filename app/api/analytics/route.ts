@@ -1,6 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireAdmin } from '@/lib/api-auth'
+import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
+
+function isResponseLike(value: unknown): value is NextResponse {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'status' in (value as any) &&
+      'headers' in (value as any),
+  )
+}
 
 function isMissingOrgIdColumn(error: any): boolean {
   const message = String(error?.message ?? '')
@@ -13,7 +22,8 @@ function isMissingOrgIdColumn(error: any): boolean {
 
 export async function GET(req: NextRequest) {
   try {
-    await requireAdmin(req)
+    const auth = await requireAuth(req).catch((e) => e)
+    if (isResponseLike(auth)) return auth
     const { searchParams } = req.nextUrl
     const orgId = searchParams.get('orgId')
     const periodParam = searchParams.get('period')
@@ -22,6 +32,8 @@ export async function GET(req: NextRequest) {
     if (!orgId) {
       return NextResponse.json({ error: 'Missing orgId' }, { status: 400 })
     }
+    const orgCheck = await requireOrgMatch(auth.id, orgId).catch((e) => e)
+    if (isResponseLike(orgCheck)) return orgCheck
 
     const now = new Date()
     const periodStart = new Date(now)
@@ -166,8 +178,9 @@ export async function GET(req: NextRequest) {
       aiQueryCount,
     })
   } catch (e) {
+    if (isResponseLike(e)) return e
     console.error('analytics route error:', e)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 

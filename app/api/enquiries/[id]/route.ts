@@ -1,7 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { sanitizeObject, containsHtml } from "@/lib/sanitize"
+import { sanitizeObject } from "@/lib/sanitize"
 import { requireAdmin } from "@/lib/api-auth"
+import { generalApiLimiter, getClientIp } from "@/lib/rate-limiter"
+
+function isResponseLike(value: unknown): value is NextResponse {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "status" in (value as any) &&
+      "headers" in (value as any),
+  )
+}
 
 function freshAdmin() {
   return createClient(
@@ -17,7 +27,10 @@ export async function PATCH(
 ) {
   const admin = freshAdmin()
   try {
-    await requireAdmin(req)
+    const limited = generalApiLimiter(`api:${getClientIp(req.headers)}`)
+    if (limited) return limited
+    const auth = await requireAdmin(req).catch((e) => e)
+    if (isResponseLike(auth)) return auth
     const { id } = await params
     if (!id) {
       return NextResponse.json({ error: "Missing id" }, { status: 400 })
@@ -33,16 +46,12 @@ export async function PATCH(
         { status: 400 },
       )
     }
-    if (status && !["new", "in_progress", "closed", "resolved"].includes(status)) {
+    if (status && !["new", "contacted", "closed", "in_progress", "resolved"].includes(status)) {
       return NextResponse.json({ error: "Invalid status value." }, { status: 400 })
     }
     if (typeof notes === "string" && notes.length > 2000) {
       return NextResponse.json({ error: "Notes too long." }, { status: 400 })
     }
-    if (typeof notes === "string" && containsHtml(notes)) {
-      return NextResponse.json({ error: "HTML/script content is not allowed." }, { status: 400 })
-    }
-
     const updatePayload: Record<string, unknown> = {}
     if (status) {
       updatePayload.status = status
@@ -67,9 +76,10 @@ export async function PATCH(
 
     return NextResponse.json({ success: true })
   } catch (e) {
+    if (isResponseLike(e)) return e
     console.error("enquiries PATCH route error", e)
     return NextResponse.json(
-      { error: "Internal server error." },
+      { error: "An error occurred. Please try again." },
       { status: 500 },
     )
   }

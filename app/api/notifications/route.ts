@@ -1,9 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
+import { sanitizeObject } from '@/lib/sanitize'
 
 // GET — User notifications
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireAuth(req)
     const { searchParams } = req.nextUrl
     const userId = searchParams.get('userId')
     const limitParam = searchParams.get('limit')
@@ -12,6 +15,10 @@ export async function GET(req: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
     }
+    if (auth.id !== userId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (auth.orgId) await requireOrgMatch(auth.id, auth.orgId)
 
     const { data, error } = await supabaseAdmin
       .from('notifications')
@@ -28,7 +35,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ notifications: data ?? [] })
   } catch (e) {
     console.error('notifications GET route error:', e)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 
@@ -41,11 +48,23 @@ type MarkReadBody = {
 // PATCH — Mark read
 export async function PATCH(req: NextRequest) {
   try {
-    const body = (await req.json()) as MarkReadBody
+    const auth = await requireAuth(req)
+    const contentType = req.headers.get("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
+    }
+    const contentLength = Number(req.headers.get("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
+    const body = sanitizeObject((await req.json()) as MarkReadBody)
     const { userId, notificationId, markAll } = body
 
     if (!userId) {
       return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
+    }
+    if (auth.id !== userId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     let query = supabaseAdmin.from('notifications').update({ is_read: true })
@@ -71,7 +90,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ success: true })
   } catch (e) {
     console.error('notifications PATCH route error:', e)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 

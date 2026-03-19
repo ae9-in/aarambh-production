@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { CheckCircle2, Clock, ArrowRight, Filter } from "lucide-react"
+import { sanitizeString } from "@/lib/sanitize"
 
 type Enquiry = {
   id: string
@@ -122,6 +123,8 @@ export default function EnquiriesPage() {
     }
   }
 
+  const s = (v: string | null | undefined) => sanitizeString(String(v ?? ""))
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -208,19 +211,19 @@ export default function EnquiriesPage() {
                 className="grid grid-cols-[1.5fr,1.7fr,1.3fr,1.2fr,1fr,1.2fr,1.8fr] gap-4 px-4 py-3 text-xs items-start"
               >
                 <div>
-                  <p className="font-medium text-[#1C1917]">{enquiry.name}</p>
+                  <p className="font-medium text-[#1C1917]">{s(enquiry.name)}</p>
                   {enquiry.message && (
                     <p className="mt-1 line-clamp-2 text-[11px] text-[#78716C]">
-                      {enquiry.message}
+                      {s(enquiry.message)}
                     </p>
                   )}
                 </div>
                 <div className="space-y-0.5">
-                  <p className="text-[#1C1917]">{enquiry.email}</p>
-                  <p className="text-[11px] text-[#78716C]">{enquiry.phone}</p>
+                  <p className="text-[#1C1917]">{s(enquiry.email)}</p>
+                  <p className="text-[11px] text-[#78716C]">{s(enquiry.phone)}</p>
                 </div>
                 <div className="text-xs text-[#1C1917]">
-                  {enquiry.company || "—"}
+                  {s(enquiry.company) || "—"}
                 </div>
                 <div className="text-xs text-[#1C1917]">
                   {enquiry.team_size || "—"}

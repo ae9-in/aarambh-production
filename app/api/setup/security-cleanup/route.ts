@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase"
 import { requireAdmin } from "@/lib/api-auth"
-import { sanitizeInput } from "@/lib/sanitize"
+import { sanitizeString } from "@/lib/sanitize"
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,8 +17,8 @@ export async function POST(req: NextRequest) {
 
     let updated = 0
     for (const row of rows || []) {
-      const name = String(sanitizeInput((row as any).name ?? ""))
-      const message = String(sanitizeInput((row as any).message ?? ""))
+      const name = sanitizeString(String((row as any).name ?? ""))
+      const message = sanitizeString(String((row as any).message ?? ""))
       const { error: updateError } = await supabaseAdmin
         .from("enquiries")
         .update({ name, message })

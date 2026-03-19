@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Search, Bookmark, ChevronRight, Play, FileText, Headphones, HelpCircle, Users } from "lucide-react"
+import { Search, Bookmark, ChevronRight, Play, FileText, Headphones, HelpCircle, Users, Send, Lock } from "lucide-react"
 import Link from "next/link"
 import { useAuth } from "@/lib/auth-context"
+import { toast } from "sonner"
 
 const easeExpo = [0.16, 1, 0.3, 1]
 
@@ -81,6 +82,8 @@ export default function BrowsePage() {
       fileUrl: string | null
     }[]
   >([])
+  const [lockedCategories, setLockedCategories] = useState<{ id: string; name: string; requestStatus?: string | null }[]>([])
+  const [requestingId, setRequestingId] = useState<string | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -92,7 +95,7 @@ export default function BrowsePage() {
         setIsLoading(true)
         setError(null)
         const res = await fetch(
-          `/api/content?orgId=${encodeURIComponent(user.orgId)}`,
+          `/api/content?orgId=${encodeURIComponent(user.orgId)}&enforceAccess=true&userRole=${encodeURIComponent(user.role || "EMPLOYEE")}`,
           { credentials: "include" },
         )
         if (!res.ok) {
@@ -119,6 +122,30 @@ export default function BrowsePage() {
             fileUrl: (c.file_url as string | null) ?? null,
           })),
         )
+
+        // Locked categories with request button in Browse page
+        const [allCatRes, allowedCatRes, requestsRes] = await Promise.all([
+          fetch(`/api/categories?orgId=${encodeURIComponent(user.orgId)}`, { credentials: "include" }),
+          fetch(`/api/categories?orgId=${encodeURIComponent(user.orgId)}&enforceAccess=true&userRole=${encodeURIComponent(user.role || "EMPLOYEE")}`, { credentials: "include" }),
+          fetch(`/api/access-requests?orgId=${encodeURIComponent(user.orgId)}&userId=${encodeURIComponent(user.id)}`, { credentials: "include" }),
+        ])
+        if (allCatRes.ok && allowedCatRes.ok) {
+          const allCats = ((await allCatRes.json()).categories || []) as any[]
+          const allowedCats = ((await allowedCatRes.json()).categories || []) as any[]
+          const reqRows = requestsRes.ok ? (((await requestsRes.json()).requests || []) as any[]) : []
+          const allowedIds = new Set(allowedCats.map((c) => c.id))
+          const requestByCategory = new Map<string, any>()
+          reqRows.forEach((r) => requestByCategory.set(String(r.category_id), r))
+          setLockedCategories(
+            allCats
+              .filter((c) => !allowedIds.has(c.id))
+              .map((c) => ({
+                id: c.id,
+                name: c.name,
+                requestStatus: requestByCategory.get(String(c.id))?.status || null,
+              })),
+          )
+        }
       } catch (e: any) {
         console.error(e)
         setError(e?.message || "Failed to load content.")
@@ -128,6 +155,33 @@ export default function BrowsePage() {
     }
     void load()
   }, [user?.orgId])
+
+  const handleRequestAccess = async (categoryId: string) => {
+    if (!user?.orgId || !user?.id) return
+    try {
+      setRequestingId(categoryId)
+      const res = await fetch("/api/access-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categoryId,
+          userId: user.id,
+          orgId: user.orgId,
+          reason: "Requested from Browse page",
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body?.error || "Failed to request access")
+      toast.success("Access request sent to admin")
+      setLockedCategories((prev) =>
+        prev.map((c) => (c.id === categoryId ? { ...c, requestStatus: "pending" } : c)),
+      )
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to request access")
+    } finally {
+      setRequestingId(null)
+    }
+  }
 
   const filteredCourses = courses.filter((c) => {
     const matchesFilter = activeFilter === "All" || c.type.toLowerCase() === activeFilter.toLowerCase()
@@ -231,6 +285,38 @@ export default function BrowsePage() {
           </button>
         ))}
       </motion.div>
+
+      {lockedCategories.length > 0 && (
+        <motion.div
+          className="mb-6 rounded-2xl border border-[#F0EDE8] bg-white p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.22, ease: easeExpo }}
+        >
+          <h3 className="mb-3 text-sm font-semibold text-[#1C1917]">Locked Categories (Request Access)</h3>
+          <div className="flex flex-wrap gap-2">
+            {lockedCategories.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => void handleRequestAccess(cat.id)}
+                disabled={cat.requestStatus === "pending" || requestingId === cat.id}
+                className="inline-flex items-center gap-2 rounded-full border border-[#E7E5E4] px-3 py-1.5 text-xs text-[#1C1917] hover:border-[#FF6B35] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Lock size={12} />
+                <span>{cat.name}</span>
+                {cat.requestStatus === "pending" ? (
+                  <span className="text-amber-600">Pending</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[#FF6B35]">
+                    <Send size={11} />
+                    Request
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       {/* Course Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

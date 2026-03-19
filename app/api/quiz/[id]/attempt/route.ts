@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getLevel } from '@/lib/openai'
 import { sendCertEmail } from '@/lib/email'
+import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
+import { sanitizeObject } from '@/lib/sanitize'
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10)
@@ -46,8 +48,17 @@ export async function POST(
   { params }: { params: { id: string } },
 ) {
   try {
+    const auth = await requireAuth(req as any)
+    const contentType = (req as any).headers?.get?.("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
+    }
+    const contentLength = Number((req as any).headers?.get?.("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
     const quizId = params.id
-    const body = await req.json()
+    const body = sanitizeObject(await req.json())
     const {
       userId,
       orgId,
@@ -66,6 +77,10 @@ export async function POST(
         { status: 400 },
       )
     }
+    if (auth.id !== userId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    await requireOrgMatch(auth.id, orgId)
 
     // 1. Get quiz
     const { data: quiz, error: quizError } = await supabaseAdmin
@@ -306,7 +321,7 @@ export async function POST(
     })
   } catch (e) {
     console.error('POST /api/quiz/[id]/attempt unexpected:', e)
-    return NextResponse.json({ error: 'Unexpected error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 

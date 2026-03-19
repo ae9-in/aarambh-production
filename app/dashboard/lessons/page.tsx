@@ -16,23 +16,30 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth-context"
-import { detectType } from "@/lib/firebase"
 import { toast } from "sonner"
 
 function uploadLessonFile(
   file: File,
   orgId: string,
-  fileType: string,
+  categoryId: string,
+  userId: string,
+  title: string,
+  description: string,
+  taskText: string,
   onProgress: (pct: number) => void,
-): Promise<{ url: string; path: string }> {
+): Promise<{ content: ApiContent }> {
   return new Promise((resolve, reject) => {
     const fd = new FormData()
     fd.append("file", file)
     fd.append("orgId", orgId)
-    fd.append("fileType", fileType)
+    fd.append("categoryId", categoryId)
+    fd.append("userId", userId)
+    fd.append("title", title)
+    fd.append("description", description)
+    fd.append("taskText", taskText)
 
     const xhr = new XMLHttpRequest()
-    xhr.open("POST", "/api/upload/lesson-file")
+    xhr.open("POST", "/api/upload")
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -46,7 +53,7 @@ function uploadLessonFile(
         try {
           const data = JSON.parse(xhr.responseText)
           onProgress(100)
-          resolve({ url: data.url, path: data.path })
+          resolve(data as { content: ApiContent })
         } catch {
           reject(new Error("Invalid response from upload server"))
         }
@@ -75,6 +82,7 @@ type ApiContent = {
   category_id: string | null
   title: string
   description: string | null
+  task_text?: string | null
   type: string
   xp_reward: number | null
   file_url: string | null
@@ -163,6 +171,7 @@ export default function LessonsPage() {
     type: "VIDEO",
     categoryId: "",
     description: "",
+    taskText: "",
   })
 
   useEffect(() => {
@@ -280,6 +289,7 @@ export default function LessonsPage() {
       type: "VIDEO",
       categoryId: "",
       description: "",
+      taskText: "",
     })
     setFile(null)
     setUploadProgress(0)
@@ -303,41 +313,16 @@ export default function LessonsPage() {
       setIsSubmitting(true)
       setUploadProgress(0)
 
-      const detectedType = detectType(file.type, file.name)
-      const fileType = formData.type || detectedType || "NOTE"
-
-      const { url, path: firebasePath } = await uploadLessonFile(
+      const { content: created } = await uploadLessonFile(
         file,
         user.orgId,
-        fileType,
+        formData.categoryId,
+        user.id,
+        formData.title.trim(),
+        formData.description.trim(),
+        formData.taskText.trim(),
         (pct) => setUploadProgress(pct),
       )
-
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orgId: user.orgId,
-          categoryId: formData.categoryId,
-          userId: user.id,
-          title: formData.title.trim(),
-          fileType,
-          firebaseUrl: url,
-          firebasePath,
-          fileSize: file.size,
-          durationMinutes: null,
-        }),
-      })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        throw new Error(data?.error || "Failed to save lesson.")
-      }
-
-      const body = await res.json()
-      const created: ApiContent | undefined = body.content
       if (created) {
         const catMap: Record<string, string> = {}
         categories.forEach((c) => {
@@ -779,6 +764,18 @@ export default function LessonsPage() {
                 })
               }
               rows={3}
+              className="w-full px-4 py-2 border border-[#E7E5E4] rounded-lg focus:ring-2 focus:ring-[#FF6B35]/20 resize-none"
+            />
+            <textarea
+              placeholder="Task for this module (e.g. Review the PDF and complete checklist)"
+              value={formData.taskText}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  taskText: e.target.value,
+                })
+              }
+              rows={2}
               className="w-full px-4 py-2 border border-[#E7E5E4] rounded-lg focus:ring-2 focus:ring-[#FF6B35]/20 resize-none"
             />
             <div>

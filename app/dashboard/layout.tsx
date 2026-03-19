@@ -51,11 +51,36 @@ export default function DashboardLayout({
   }, [pathname])
 
   useEffect(() => {
+    if (pathname === "/dashboard/enquiries") {
+      try {
+        localStorage.setItem("enquiries_last_seen_at", new Date().toISOString())
+      } catch {
+        // ignore
+      }
+      setNewEnquiryCount(0)
+    }
+  }, [pathname])
+
+  useEffect(() => {
     async function loadCounts() {
       try {
         if (!user?.orgId) return
+        let lastSeen = ""
+        try {
+          lastSeen = localStorage.getItem("enquiries_last_seen_at") || ""
+        } catch {
+          // ignore
+        }
+        const enquiryUrl = new URL("/api/enquiries", window.location.origin)
+        enquiryUrl.searchParams.set("status", "new")
+        enquiryUrl.searchParams.set("count", "true")
+        enquiryUrl.searchParams.set("orgId", user.orgId)
+        if (lastSeen) {
+          enquiryUrl.searchParams.set("created_after", lastSeen)
+        }
+
         const [enquiryRes, approvalRes] = await Promise.all([
-          fetch("/api/enquiries?status=new&count=true", { credentials: "include" }),
+          fetch(enquiryUrl.toString(), { credentials: "include" }),
           fetch("/api/users?status=pending&count=true", { credentials: "include" }),
         ])
 

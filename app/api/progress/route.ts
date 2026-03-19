@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getLevel } from '@/lib/openai'
+import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
+import { sanitizeObject } from '@/lib/sanitize'
 
 type ProgressStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED'
 
@@ -54,6 +56,7 @@ async function checkAndAwardBadges(
 // GET — User progress for all content
 export async function GET(req: Request) {
   try {
+    const auth = await requireAuth(req as any)
     const { searchParams } = new URL(req.url)
     const userId = searchParams.get('userId')
     const orgId = searchParams.get('orgId')
@@ -64,6 +67,10 @@ export async function GET(req: Request) {
         { status: 400 },
       )
     }
+    if (auth.id !== userId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    await requireOrgMatch(auth.id, orgId)
 
     let data: any[] | null = null
     let error: any = null
@@ -150,14 +157,23 @@ export async function GET(req: Request) {
     return NextResponse.json({ progress })
   } catch (e) {
     console.error('GET /api/progress unexpected:', e)
-    return NextResponse.json({ error: 'Unexpected error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 
 // POST — Update progress (main gamification endpoint)
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
+    const auth = await requireAuth(req as any)
+    const contentType = (req as any).headers?.get?.("content-type") || ""
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
+    }
+    const contentLength = Number((req as any).headers?.get?.("content-length") || "0")
+    if (contentLength > 10240) {
+      return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
+    }
+    const body = sanitizeObject(await req.json())
     const {
       userId,
       contentId,
@@ -182,6 +198,10 @@ export async function POST(req: Request) {
         { status: 400 },
       )
     }
+    if (auth.id !== userId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    await requireOrgMatch(auth.id, orgId)
 
     // 1. Get existing progress record
     const { data: existing, error: existingError } = await supabaseAdmin
@@ -418,7 +438,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ progress: upsertedRecord })
   } catch (e) {
     console.error('POST /api/progress unexpected:', e)
-    return NextResponse.json({ error: 'Unexpected error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 

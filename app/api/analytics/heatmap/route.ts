@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireAdmin, requireOrgMatch } from '@/lib/api-auth'
 
 export async function GET(req: Request) {
   try {
+    const auth = await requireAdmin(req as any)
     const { searchParams } = new URL(req.url)
     const orgId = searchParams.get('orgId')
 
     if (!orgId) {
       return NextResponse.json({ error: 'Missing orgId' }, { status: 400 })
     }
+    await requireOrgMatch(auth.id, orgId)
 
     const { data: content, error: contentError } = await supabaseAdmin
       .from('content')
@@ -65,7 +68,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ heatmapData })
   } catch (e) {
     console.error('GET /api/analytics/heatmap unexpected:', e)
-    return NextResponse.json({ error: 'Unexpected error' }, { status: 500 })
+    return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 })
   }
 }
 
