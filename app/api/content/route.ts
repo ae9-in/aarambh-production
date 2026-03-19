@@ -151,7 +151,10 @@ export async function POST(req: NextRequest) {
       const origin = req.nextUrl.origin
       fetch(`${origin}/api/ai/embed`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-embed-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+        },
         body: JSON.stringify({
           contentId: data.id,
           fileUrl: fileUrl ?? null,

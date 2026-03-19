@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { uploadToCloudinary, detectType, detectResourceType } from '@/lib/cloudinary'
 
-const EMBEDDABLE_TYPES = new Set(['PDF', 'NOTE'])
+const EMBEDDABLE_TYPES = new Set(['PDF', 'NOTE', 'PPT', 'VIDEO'])
 
 export async function POST(req: NextRequest) {
   try {
@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-internal-embed-key': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
         },
         body: JSON.stringify({
           contentId: data.id,

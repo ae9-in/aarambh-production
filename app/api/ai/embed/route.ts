@@ -17,7 +17,12 @@ const BATCH_DELAY_MS = 300
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = await requireAdmin(req)
+    const internalKey = req.headers.get('x-internal-embed-key')
+    const isInternalCall =
+      Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+      internalKey === process.env.SUPABASE_SERVICE_ROLE_KEY
+
+    const auth = isInternalCall ? null : await requireAdmin(req)
     const contentType = req.headers.get("content-type") || ""
     if (!contentType.includes("application/json")) {
       return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 415 })
@@ -32,7 +37,9 @@ export async function POST(req: NextRequest) {
     if (!contentId || !orgId) {
       return NextResponse.json({ error: 'Missing contentId or orgId' }, { status: 400 })
     }
-    await requireOrgMatch(auth.id, orgId)
+    if (!isInternalCall && auth?.id) {
+      await requireOrgMatch(auth.id, orgId)
+    }
 
     // 1. Get content record for mime type + filename
     const { data: content, error: contentError } = await supabaseAdmin

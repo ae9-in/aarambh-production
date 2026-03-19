@@ -20,6 +20,14 @@ type ChatRequestBody = {
 const groqApiKey = process.env.GROQ_API_KEY
 const groq = groqApiKey ? new Groq({ apiKey: groqApiKey }) : null
 
+function tokenize(input: string): string[] {
+  return String(input || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get("content-type") || ""
@@ -52,7 +60,6 @@ export async function POST(req: NextRequest) {
 
     // 2-5. Retrieval pipeline (embedding + vector search + access filtering).
     let chunks: any[] = []
-    let retrievalIssue: string | null = null
     const wantsPerformerDetails = /performer|top performer|leaderboard|rank|best/i.test(question)
     let performerContext = ""
     try {
@@ -81,6 +88,26 @@ export async function POST(req: NextRequest) {
 
       if (categoryId) {
         accessibleCategoryIds = (accessibleCategoryIds || []).filter((id) => id === categoryId)
+      } else if (accessibleCategoryIds && accessibleCategoryIds.length > 0) {
+        // Category keyword steering: if question mentions category terms (e.g. "sales"),
+        // restrict retrieval to those matching categories to keep answers on-topic.
+        const { data: categoryMeta } = await supabaseAdmin
+          .from("categories")
+          .select("id,name")
+          .eq("org_id", orgId)
+          .in("id", accessibleCategoryIds)
+
+        const qTokens = new Set(tokenize(question))
+        const matchedCategoryIds = (categoryMeta || [])
+          .filter((row: any) => {
+            const nameTokens = tokenize(String(row.name || ""))
+            return nameTokens.some((t) => qTokens.has(t))
+          })
+          .map((row: any) => String(row.id))
+
+        if (matchedCategoryIds.length > 0) {
+          accessibleCategoryIds = accessibleCategoryIds.filter((id) => matchedCategoryIds.includes(id))
+        }
       }
 
       // Optional: include top quiz performer details in the system prompt.
@@ -242,7 +269,6 @@ export async function POST(req: NextRequest) {
       chunks = chunks.slice(0, 8)
     } catch (retrievalError) {
       console.error('chat: retrieval pipeline error', retrievalError)
-      retrievalIssue = 'Knowledge retrieval is temporarily unavailable.'
       chunks = []
     }
 
@@ -306,9 +332,8 @@ export async function POST(req: NextRequest) {
 
     // 9. If nothing relevant is found, stream a grounded fallback immediately.
     if (!context.trim()) {
-      fullText = retrievalIssue
-        ? `${retrievalIssue} Please try again in a moment.`
-        : "This topic is not covered in your current training materials. Try asking within a specific category you have access to, like Web Development, Sales, or Marketing."
+      fullText =
+        "This topic is not covered in your current training materials, or the AI could not find relevant content yet. Try asking about a specific lesson, category, or policy you've uploaded."
 
       const readable = new ReadableStream<Uint8Array>({
         async start(controller) {
@@ -382,12 +407,14 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `You are Arambh AI, a senior training assistant.
+          content: `You are Arambh AI, a strict enterprise training assistant.
 
 Use ONLY the company training content provided below.
 - If the user asks something outside this content, respond exactly:
 "This topic is not covered in your current training materials."
-- Keep answers detailed, practical, and encouraging.
+- Do not engage in casual/off-topic conversation, jokes, or personal chat.
+- Keep answers detailed, practical, and professional.
+- Prefer category-specific guidance; if query implies a category (e.g., Sales), answer only from that category context.
 - Output clean Markdown, with proper spacing:
   - Use short headings (## or ###) for sections
   - Put each bullet on a new line

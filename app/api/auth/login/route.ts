@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase"
+import { createClient } from "@supabase/supabase-js"
 import { sanitizeObject, validateEmail } from "@/lib/sanitize"
 import { getClientIp, loginLimiter } from "@/lib/rate-limiter"
 
@@ -31,8 +32,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 })
     }
 
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return NextResponse.json(
+        { error: "Login is temporarily unavailable. Please contact admin." },
+        { status: 500 },
+      )
+    }
+
+    // Use anon client for password auth (doesn't require service role key on Vercel).
+    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
     const { data: authData, error: authError } =
-      await supabaseAdmin.auth.signInWithPassword({ email, password })
+      await authClient.auth.signInWithPassword({ email, password })
 
     if (authError || !authData.user) {
       return NextResponse.json(
@@ -41,7 +55,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { data: profile, error: profileError } = await supabaseAdmin
+    const accessToken = authData.session?.access_token
+    if (!accessToken) {
+      return NextResponse.json({ error: "Invalid email or password." }, { status: 401 })
+    }
+
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    })
+
+    const { data: profile, error: profileError } = await userClient
       .from("profiles")
       .select("*, organizations(id, name, logo_url, primary_color, plan)")
       .eq("id", authData.user.id)
@@ -59,31 +83,35 @@ export async function POST(req: NextRequest) {
     if (!profile.org_id) {
       let fallbackOrgId: string | null = null
 
-      const { data: adminWithOrg } = await supabaseAdmin
-        .from("profiles")
-        .select("org_id")
-        .in("role", ["SUPER_ADMIN", "ADMIN", "MANAGER"])
-        .not("org_id", "is", null)
-        .limit(1)
-        .maybeSingle()
-
-      if (adminWithOrg?.org_id) {
-        fallbackOrgId = adminWithOrg.org_id as string
-      } else {
-        const { data: anyOrg } = await supabaseAdmin
-          .from("organizations")
-          .select("id")
+      try {
+        const { data: adminWithOrg } = await supabaseAdmin
+          .from("profiles")
+          .select("org_id")
+          .in("role", ["SUPER_ADMIN", "ADMIN", "MANAGER"])
+          .not("org_id", "is", null)
           .limit(1)
           .maybeSingle()
-        fallbackOrgId = (anyOrg?.id as string) ?? null
-      }
 
-      if (fallbackOrgId) {
-        await supabaseAdmin
-          .from("profiles")
-          .update({ org_id: fallbackOrgId, updated_at: new Date().toISOString() })
-          .eq("id", profile.id)
-        profile.org_id = fallbackOrgId
+        if (adminWithOrg?.org_id) {
+          fallbackOrgId = adminWithOrg.org_id as string
+        } else {
+          const { data: anyOrg } = await supabaseAdmin
+            .from("organizations")
+            .select("id")
+            .limit(1)
+            .maybeSingle()
+          fallbackOrgId = (anyOrg?.id as string) ?? null
+        }
+
+        if (fallbackOrgId) {
+          await supabaseAdmin
+            .from("profiles")
+            .update({ org_id: fallbackOrgId, updated_at: new Date().toISOString() })
+            .eq("id", profile.id)
+          profile.org_id = fallbackOrgId
+        }
+      } catch (healErr) {
+        console.warn("[login] org auto-heal skipped:", healErr)
       }
     }
 
