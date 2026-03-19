@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAccessibleCategoryIdsForUser } from '@/lib/category-access'
-import { sanitizeObject } from '@/lib/sanitize'
 import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
 
 function isResponseLike(value: unknown): value is NextResponse {
@@ -11,6 +10,12 @@ function isResponseLike(value: unknown): value is NextResponse {
       'status' in (value as any) &&
       'headers' in (value as any),
   )
+}
+
+function normalizeText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const cleaned = value.trim()
+  return cleaned.length > 0 ? cleaned : null
 }
 
 export async function GET(req: NextRequest) {
@@ -96,22 +101,13 @@ export async function POST(req: NextRequest) {
     if (contentLength > 25 * 1024 * 1024) {
       return NextResponse.json({ error: "Payload too large." }, { status: 413 })
     }
-    const body = sanitizeObject(await req.json())
-    const {
-      orgId,
-      name,
-      description,
-      icon,
-      color,
-      createdBy,
-    }: {
-      orgId: string
-      name: string
-      description?: string | null
-      icon?: string | null
-      color?: string | null
-      createdBy: string
-    } = body
+    const body = await req.json()
+    const orgId = normalizeText(body?.orgId)
+    const name = normalizeText(body?.name)
+    const description = normalizeText(body?.description)
+    const icon = normalizeText(body?.icon)
+    const color = normalizeText(body?.color)
+    const createdBy = normalizeText(body?.createdBy)
 
     if (!orgId || !name || !createdBy) {
       return NextResponse.json(

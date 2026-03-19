@@ -1,8 +1,22 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getAccessibleCategoryIdsForUser } from '@/lib/category-access'
-import { sanitizeObject } from '@/lib/sanitize'
 import { requireAuth, requireOrgMatch } from '@/lib/api-auth'
+
+function normalizeText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const cleaned = value.trim()
+  return cleaned.length > 0 ? cleaned : null
+}
+
+function normalizeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
 
 export async function GET(req: NextRequest) {
   const auth = await requireAuth(req)
@@ -98,24 +112,14 @@ export async function POST(req: NextRequest) {
     if (contentLength > 10240) {
       return NextResponse.json({ error: "An error occurred. Please try again." }, { status: 413 })
     }
-    const body = sanitizeObject(await req.json())
-    const {
-      orgId,
-      categoryId,
-      title,
-      type,
-      description,
-      xpReward,
-      fileUrl,
-    }: {
-      orgId: string
-      categoryId: string
-      title: string
-      type: string
-      description?: string | null
-      xpReward?: number | null
-      fileUrl?: string | null
-    } = body
+    const body = await req.json()
+    const orgId = normalizeText(body?.orgId)
+    const categoryId = normalizeText(body?.categoryId)
+    const title = normalizeText(body?.title)
+    const type = normalizeText(body?.type)
+    const description = normalizeText(body?.description)
+    const xpReward = normalizeNumber(body?.xpReward)
+    const fileUrl = normalizeText(body?.fileUrl)
 
     if (!orgId || !categoryId || !title || !type) {
       return NextResponse.json(
@@ -147,7 +151,7 @@ export async function POST(req: NextRequest) {
 
     // Fire-and-forget embedding trigger for AI-searchable lesson types.
     const aiSearchableTypes = new Set(['PDF', 'NOTE', 'PPT', 'VIDEO'])
-    if (aiSearchableTypes.has(type.toUpperCase())) {
+    if (type && aiSearchableTypes.has(type.toUpperCase())) {
       const origin = req.nextUrl.origin
       fetch(`${origin}/api/ai/embed`, {
         method: 'POST',
