@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { supabaseAdmin } from "@/lib/supabase"
 import { createClient } from "@supabase/supabase-js"
 import { sanitizeObject, validateEmail } from "@/lib/sanitize"
 import { getClientIp, loginLimiter } from "@/lib/rate-limiter"
@@ -79,42 +78,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Auto-heal org_id for old users missing organization assignment.
-    if (!profile.org_id) {
-      let fallbackOrgId: string | null = null
-
-      try {
-        const { data: adminWithOrg } = await supabaseAdmin
-          .from("profiles")
-          .select("org_id")
-          .in("role", ["SUPER_ADMIN", "ADMIN", "MANAGER"])
-          .not("org_id", "is", null)
-          .limit(1)
-          .maybeSingle()
-
-        if (adminWithOrg?.org_id) {
-          fallbackOrgId = adminWithOrg.org_id as string
-        } else {
-          const { data: anyOrg } = await supabaseAdmin
-            .from("organizations")
-            .select("id")
-            .limit(1)
-            .maybeSingle()
-          fallbackOrgId = (anyOrg?.id as string) ?? null
-        }
-
-        if (fallbackOrgId) {
-          await supabaseAdmin
-            .from("profiles")
-            .update({ org_id: fallbackOrgId, updated_at: new Date().toISOString() })
-            .eq("id", profile.id)
-          profile.org_id = fallbackOrgId
-        }
-      } catch (healErr) {
-        console.warn("[login] org auto-heal skipped:", healErr)
-      }
-    }
-
     if (profile.status === "pending") {
       return NextResponse.json(
         {
@@ -150,8 +113,8 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     console.error("login route error:", e)
     return NextResponse.json(
-      { error: "An error occurred. Please try again." },
-      { status: 500 },
+      { error: "Login failed. Please check credentials and try again." },
+      { status: 401 },
     )
   }
 }
