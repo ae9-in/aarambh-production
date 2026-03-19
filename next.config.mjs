@@ -17,7 +17,7 @@ const nextConfig = {
           {
             key: "Content-Security-Policy",
             value:
-              "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://prod.spline.design https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co https://firebasestorage.googleapis.com https://res.cloudinary.com ws: wss:; img-src 'self' data: https:; media-src 'self' https://firebasestorage.googleapis.com https://storage.googleapis.com https://res.cloudinary.com blob:; frame-src 'self' https://res.cloudinary.com https://view.officeapps.live.com https://docs.google.com; font-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
+              "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://prod.spline.design https://va.vercel-scripts.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co https://firebasestorage.googleapis.com https://res.cloudinary.com ws: wss:; img-src 'self' data: blob: https:; media-src 'self' https://firebasestorage.googleapis.com https://storage.googleapis.com https://res.cloudinary.com blob:; frame-src 'self' https://res.cloudinary.com https://view.officeapps.live.com https://docs.google.com; font-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
           },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },

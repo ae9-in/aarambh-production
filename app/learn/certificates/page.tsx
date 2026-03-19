@@ -1,31 +1,88 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { motion } from "framer-motion"
-import { Award, Download, Share2, Calendar, ExternalLink } from "lucide-react"
+import { Award, Calendar, Download } from "lucide-react"
 import { toast } from "sonner"
 
 const easeExpo = [0.16, 1, 0.3, 1]
 
-const certificates = [
-  { id: "1", title: "Sales Process Mastery", completedDate: "Mar 5, 2024", issuer: "Arambh Learning", credentialId: "CERT-2024-001", image: "https://bizconsultancy.iid.org.in/basepath/thumbnail/courses-industry/31b6684f-6efe-41bf-8d92-ddb9afafd84d.jpg" },
-  { id: "2", title: "Customer Service Excellence", completedDate: "Feb 28, 2024", issuer: "Arambh Learning", credentialId: "CERT-2024-002", image: "https://media.licdn.com/dms/image/v2/D4D12AQEeytTj0cDWpA/article-cover_image-shrink_600_2000/article-cover_image-shrink_600_2000/0/1676263729343?e=2147483647&v=beta&t=CS9xmWsQ2cnG99LpDZen1An40MkRgiNjbAKYmze9etM" },
-  { id: "3", title: "Product Knowledge Fundamentals", completedDate: "Feb 15, 2024", issuer: "Arambh Learning", credentialId: "CERT-2024-003", image: "https://img.freepik.com/free-photo/online-marketing_53876-176744.jpg?semt=ais_hybrid&w=740&q=80" },
-]
+type Certificate = {
+  id: string
+  courseName: string
+  score: number
+  certificateNumber: string
+  createdAt: string
+  contentId: string
+  quizId: string | null
+  certificateUrl: string | null
+}
+
+function formatDate(value: string) {
+  try {
+    return new Date(value).toLocaleDateString()
+  } catch {
+    return value
+  }
+}
 
 export default function CertificatesPage() {
   const [isLoading, setIsLoading] = useState(true)
+  const [certificates, setCertificates] = useState<Certificate[]>([])
 
+  // Use dynamic fetch so this page is always real (no dummy data).
   useEffect(() => {
-    setTimeout(() => setIsLoading(false), 400)
+    let cancelled = false
+
+    async function load() {
+      setIsLoading(true)
+      try {
+        const authRes = await fetch("/api/auth/me", { credentials: "include" })
+        if (!authRes.ok) throw new Error("Not authenticated")
+        const authJson = await authRes.json().catch(() => null)
+        const userId = authJson?.profile?.id ?? authJson?.profile?.user_id ?? authJson?.id
+        if (!userId) throw new Error("Missing user id")
+
+        const res = await fetch(`/api/certificates?userId=${encodeURIComponent(userId)}`, {
+          credentials: "include",
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => null)
+          throw new Error(data?.error || "Failed to load certificates")
+        }
+        const data = await res.json()
+        if (cancelled) return
+        setCertificates((data?.certificates ?? []) as Certificate[])
+      } catch (e: any) {
+        console.error(e)
+        toast.error(e?.message || "Failed to load certificates")
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
-  const handleDownload = (title: string) => {
-    toast.success(`Downloading "${title}" certificate...`)
-  }
+  const initialsByCourse = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const c of certificates) {
+      const parts = String(c.courseName || "").trim().split(/\s+/).filter(Boolean)
+      const init = parts.slice(0, 2).map((p) => p[0]?.toUpperCase() || "").join("")
+      map.set(c.id, init || "A")
+    }
+    return map
+  }, [certificates])
 
-  const handleShare = (title: string) => {
-    toast.success(`Share link copied for "${title}"`)
+  const handleDownload = (cert: Certificate) => {
+    if (!cert.certificateUrl) {
+      toast.error("Certificate file is not available yet. Ask admin to upload it.")
+      return
+    }
+    window.open(cert.certificateUrl, "_blank", "noopener,noreferrer")
   }
 
   if (isLoading) {
@@ -57,12 +114,11 @@ export default function CertificatesPage() {
             whileHover={{ y: -2, boxShadow: "0 16px 48px rgba(0,0,0,0.08)" }}
           >
             {/* Certificate Preview */}
-            <div className="relative h-32 overflow-hidden rounded-t-2xl">
-              <img src={cert.image} alt={cert.title} className="w-full h-full object-cover" />
-              <div className="absolute inset-0" style={{ background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.4) 100%)" }} />
+            <div className="relative h-32 overflow-hidden rounded-t-2xl bg-gradient-to-r from-[#FF6B35]/20 to-[#E85520]/10">
+              <div className="absolute inset-0 opacity-30" style={{ backgroundImage: "radial-gradient(circle at 20% 20%, #FF6B35 0, transparent 45%), radial-gradient(circle at 80% 40%, #E85520 0, transparent 50%)" }} />
               <div className="absolute bottom-0 left-0 right-0 p-6 z-10">
                 <p className="text-[10px] text-[#FF6B35] font-mono uppercase tracking-wider">Certificate of Completion</p>
-                <h3 className="text-lg font-bold text-white mt-1">{cert.title}</h3>
+                <h3 className="text-lg font-bold text-white mt-1">{cert.courseName}</h3>
               </div>
             </div>
 
@@ -71,45 +127,31 @@ export default function CertificatesPage() {
               <div className="flex flex-wrap gap-4 text-sm">
                 <div>
                   <p className="text-[11px] text-[#9CA3AF] uppercase tracking-wide">Issued By</p>
-                  <p className="font-medium text-[#1C1917]">{cert.issuer}</p>
+                  <p className="font-medium text-[#1C1917]">Arambh Learning</p>
                 </div>
                 <div>
                   <p className="text-[11px] text-[#9CA3AF] uppercase tracking-wide">Date</p>
                   <p className="font-medium text-[#1C1917] flex items-center gap-1">
-                    <Calendar size={12} /> {cert.completedDate}
+                    <Calendar size={12} /> {formatDate(cert.createdAt)}
                   </p>
                 </div>
                 <div>
                   <p className="text-[11px] text-[#9CA3AF] uppercase tracking-wide">Credential ID</p>
-                  <p className="font-mono text-xs text-[#1C1917]">{cert.credentialId}</p>
+                  <p className="font-mono text-xs text-[#1C1917]">{cert.certificateNumber}</p>
                 </div>
               </div>
 
               {/* Actions */}
               <div className="flex gap-2 mt-5 pt-5 border-t border-[#F0EDE8]">
                 <motion.button
-                  onClick={() => handleDownload(cert.title)}
+                  onClick={() => handleDownload(cert)}
                   className="flex-1 inline-flex items-center justify-center gap-2 h-10 rounded-xl bg-gradient-to-r from-[#FF6B35] to-[#E85520] text-white text-sm font-medium"
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                 >
                   <Download size={16} /> Download
                 </motion.button>
-                <motion.button
-                  onClick={() => handleShare(cert.title)}
-                  className="flex-1 inline-flex items-center justify-center gap-2 h-10 rounded-xl border border-[#F0EDE8] text-[#1C1917] text-sm font-medium hover:border-[#FF6B35] transition-colors"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  <Share2 size={16} /> Share
-                </motion.button>
-                <motion.button
-                  className="w-10 h-10 rounded-xl border border-[#F0EDE8] flex items-center justify-center text-[#6B7280] hover:border-[#FF6B35] hover:text-[#FF6B35] transition-colors"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <ExternalLink size={16} />
-                </motion.button>
+                <div className="flex-1" />
               </div>
             </div>
           </motion.div>

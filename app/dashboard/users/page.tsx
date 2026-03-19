@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Search } from "lucide-react"
+import { Search, Award, Upload, X } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import CountUp from "react-countup"
 import { toast } from "sonner"
@@ -25,6 +25,13 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive" | "pending">("all")
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const [certSidebarUserId, setCertSidebarUserId] = useState<string | null>(null)
+  const [candidateCertificates, setCandidateCertificates] = useState<
+    Array<any>
+  >([])
+  const [certLoading, setCertLoading] = useState(false)
+  const [uploadingCertId, setUploadingCertId] = useState<string | null>(null)
 
   const loadUsers = async () => {
     try {
@@ -58,6 +65,65 @@ export default function UsersPage() {
   useEffect(() => {
     void loadUsers()
   }, [])
+
+  const loadCandidateCertificates = async (userId: string) => {
+    setCertLoading(true)
+    try {
+      const res = await fetch(`/api/certificates?userId=${encodeURIComponent(userId)}`, {
+        credentials: "include",
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || "Failed to load certificates")
+      }
+      const data = await res.json()
+      setCandidateCertificates((data?.certificates ?? []) as any[])
+    } catch (e: any) {
+      console.error(e)
+      toast.error(e?.message || "Failed to load certificates")
+      setCandidateCertificates([])
+    } finally {
+      setCertLoading(false)
+    }
+  }
+
+  const handleOpenCertificateSidebar = (userId: string) => {
+    setCertSidebarUserId(userId)
+    void loadCandidateCertificates(userId)
+  }
+
+  const handleUploadCertificate = async (cert: any, file: File) => {
+    if (!certSidebarUserId) return
+    setUploadingCertId(String(cert?.id || ""))
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      form.append("userId", certSidebarUserId)
+      form.append("contentId", String(cert?.contentId || ""))
+      form.append("quizId", String(cert?.quizId || ""))
+      form.append("courseName", String(cert?.courseName || ""))
+      form.append("score", String(cert?.score ?? 0))
+      form.append("certificateNumber", String(cert?.certificateNumber || ""))
+
+      const res = await fetch("/api/certificates/upload", {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || "Certificate upload failed")
+      }
+
+      toast.success("Certificate uploaded")
+      await loadCandidateCertificates(certSidebarUserId)
+    } catch (e: any) {
+      toast.error(e?.message || "Certificate upload failed")
+    } finally {
+      setUploadingCertId(null)
+    }
+  }
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
@@ -204,6 +270,17 @@ export default function UsersPage() {
                   </div>
                 </div>
                 <p className="mt-2 text-xs text-[#78716C]">Department: {user.department || "—"}</p>
+
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenCertificateSidebar(user.id)}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-[#E7E5E4] px-3 py-2 text-xs font-semibold hover:border-[#FF6B35] hover:text-[#FF6B35]"
+                  >
+                    <Award size={14} />
+                    Certificates
+                  </button>
+                </div>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -258,7 +335,17 @@ export default function UsersPage() {
                     </motion.button>
                   </td>
                   <td className="px-6 py-4 text-right text-xs text-[#78716C]">
-                    {user.department || "—"}
+                    <div className="flex flex-col items-end gap-2">
+                      <span>{user.department || "—"}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCertificateSidebar(user.id)}
+                        className="inline-flex items-center gap-2 rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold hover:border-[#FF6B35] hover:text-[#FF6B35] transition-colors"
+                      >
+                        <Award size={14} />
+                        Certs
+                      </button>
+                    </div>
                   </td>
                 </motion.tr>
               ))}
@@ -266,6 +353,98 @@ export default function UsersPage() {
           </tbody>
         </table>
       </div>
+
+      {certSidebarUserId && (
+        <div
+          className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/40"
+          onClick={() => setCertSidebarUserId(null)}
+        >
+          <div
+            className="w-full max-w-lg bg-white h-full shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#E7E5E4] px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Award size={18} className="text-[#FF6B35]" />
+                <h2 className="text-sm font-bold text-[#1C1917]">Certificates Sidebar</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCertSidebarUserId(null)}
+                className="rounded-md p-2 hover:bg-[#F5F5F4]"
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="px-4 py-4 space-y-4 overflow-y-auto h-[calc(100%-56px)]">
+              {certLoading ? (
+                <div className="text-sm text-[#78716C]">Loading certificates...</div>
+              ) : candidateCertificates.length === 0 ? (
+                <div className="text-sm text-[#78716C]">
+                  No certificates found for this candidate.
+                </div>
+              ) : (
+                candidateCertificates.map((cert) => (
+                  <div
+                    key={cert.id}
+                    className="border border-[#E7E5E4] rounded-2xl p-3 space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] text-[#78716C] uppercase tracking-wide">
+                          Course
+                        </p>
+                        <p className="text-sm font-semibold text-[#1C1917]">
+                          {cert.courseName}
+                        </p>
+                        <p className="text-[11px] text-[#9CA3AF] mt-1">
+                          ID: {cert.certificateNumber}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[11px] text-[#78716C]">Score</p>
+                        <p className="text-sm font-bold text-[#1C1917]">
+                          {cert.score ?? 0}%
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#E7E5E4] space-y-2">
+                      <p className="text-xs text-[#78716C]">
+                        Upload / replace certificate file
+                      </p>
+                      <input
+                        type="file"
+                        accept=".pdf,image/*"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (!f) return
+                          void handleUploadCertificate(cert, f).catch((err) =>
+                            toast.error(String(err?.message || err)),
+                          )
+                        }}
+                        className="block w-full text-xs text-[#78716C]"
+                      />
+                      {cert.certificateUrl ? (
+                        <p className="text-[11px] text-green-700">Uploaded</p>
+                      ) : (
+                        <p className="text-[11px] text-[#78716C]">
+                          Not uploaded yet
+                        </p>
+                      )}
+                      {uploadingCertId === String(cert?.id || "") && (
+                        <p className="text-[11px] text-[#78716C]">Uploading...</p>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
