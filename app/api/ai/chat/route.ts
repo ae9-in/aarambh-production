@@ -267,6 +267,37 @@ export async function POST(req: NextRequest) {
         })
       }
       chunks = chunks.slice(0, 8)
+
+      // Fallback retrieval: if vector match returns nothing, use category-scoped metadata search
+      // so AI can still answer from uploaded lesson titles/descriptions.
+      if (chunks.length === 0 && accessibleCategoryIds && accessibleCategoryIds.length > 0) {
+        const terms = tokenize(question).filter((t) => t.length >= 3).slice(0, 6)
+        const keyword = terms[0] || ""
+
+        let fallbackQuery = supabaseAdmin
+          .from("content")
+          .select("id,title,description,category_id")
+          .eq("org_id", orgId)
+          .eq("is_published", true)
+          .in("category_id", accessibleCategoryIds)
+          .limit(8)
+
+        if (keyword) {
+          fallbackQuery = fallbackQuery.or(`title.ilike.%${keyword}%,description.ilike.%${keyword}%`)
+        }
+
+        const { data: fallbackRows } = await fallbackQuery
+        if (fallbackRows && fallbackRows.length > 0) {
+          chunks = fallbackRows.map((row: any, i: number) => ({
+            id: `fallback-${row.id}-${i}`,
+            content_id: row.id,
+            chunk_text: `Lesson: ${String(row.title || "").trim()}\n\nSummary: ${String(
+              row.description || "",
+            ).trim()}`,
+            similarity: 0,
+          }))
+        }
+      }
     } catch (retrievalError) {
       console.error('chat: retrieval pipeline error', retrievalError)
       chunks = []

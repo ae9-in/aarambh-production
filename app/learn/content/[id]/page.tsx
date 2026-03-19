@@ -134,7 +134,21 @@ export default function LessonPage() {
         setTriedFallbackSource(false)
         setIsDocumentViewerOpen(false)
         const res = await fetch(`/api/content/${contentId}`)
-        if (!res.ok) throw new Error("Failed to load content")
+        if (!res.ok) {
+          const payload = await res.json().catch(() => null)
+          const serverMessage =
+            String(payload?.error || "").trim() || "Failed to load content"
+          if (res.status === 401) {
+            throw new Error("Session expired. Please log in again.")
+          }
+          if (res.status === 403) {
+            throw new Error(serverMessage || "Access denied for this lesson.")
+          }
+          if (res.status === 404) {
+            throw new Error(serverMessage || "Lesson not found.")
+          }
+          throw new Error(serverMessage)
+        }
         const data = await res.json()
         setContent(data.content)
         setVideoSrc(data?.content?.file_url ?? null)

@@ -31,17 +31,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 })
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    if (!supabaseUrl || !supabaseAnonKey) {
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+    const supabaseClientKey =
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!supabaseUrl || !supabaseClientKey) {
       return NextResponse.json(
         { error: "Login is temporarily unavailable. Please contact admin." },
-        { status: 500 },
+        { status: 503 },
       )
     }
 
     // Use anon client for password auth (doesn't require service role key on Vercel).
-    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+    const authClient = createClient(supabaseUrl, supabaseClientKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
     const { data: authData, error: authError } =
@@ -59,7 +63,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 })
     }
 
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+    const userClient = createClient(supabaseUrl, supabaseClientKey, {
       auth: { autoRefreshToken: false, persistSession: false },
       global: { headers: { Authorization: `Bearer ${accessToken}` } },
     })
