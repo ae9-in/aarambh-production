@@ -16,10 +16,17 @@ export function getSupabaseAdmin(): SupabaseClient<Database> {
     if (!serviceKey) {
       throw new Error('SUPABASE_SERVICE_ROLE_KEY is not set')
     }
-    _supabaseAdmin = createClient<Database>(supabaseUrl, serviceKey, {
+    // IMPORTANT: pass anon key to createClient, but force the service role JWT
+    // into the Authorization header so Supabase truly bypasses RLS.
+    _supabaseAdmin = createClient<Database>(supabaseUrl, supabaseAnonKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
+      },
+      global: {
+        headers: {
+          Authorization: `Bearer ${serviceKey}`,
+        },
       },
     })
   }

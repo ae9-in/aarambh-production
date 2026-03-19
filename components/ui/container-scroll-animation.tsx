@@ -24,7 +24,9 @@ export const ContainerScroll = ({
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
-    offset: ["start end", "end start"],
+    // Make progress start when the component top hits the viewport top,
+    // so the card is visible immediately (no long "blank" gap).
+    offset: ["start start", "end end"],
   });
 
   const rotate = useTransform(scrollYProgress, [0, 1], [20, 0]);
@@ -34,10 +36,10 @@ export const ContainerScroll = ({
   return (
     <div
       ref={containerRef}
-      className="relative h-[120rem] md:h-[140rem] flex items-center justify-center p-2 md:p-20"
+      className="relative min-h-[80vh] md:min-h-[90vh] flex items-center justify-center p-0 md:p-8"
     >
       <div
-        className="py-10 md:py-40 w-full relative"
+        className="py-2 md:py-10 w-full relative"
         style={{ perspective: "1000px" }}
       >
         <Header translate={translate} titleComponent={titleComponent} />
@@ -112,7 +114,7 @@ export const Card = ({
         boxShadow:
           "0 0 #0000004d, 0 9px 20px #0000004a, 0 37px 37px #00000042, 0 84px 50px #00000026, 0 149px 60px #0000000a, 0 233px 65px #00000003",
       }}
-      className="max-w-5xl -mt-12 mx-auto h-[30rem] md:h-[40rem] w-full border-4 border-[#FF6B35] p-2 md:p-6 bg-[#1C1917] rounded-[30px]"
+      className="max-w-5xl -mt-8 mx-auto h-[30rem] md:h-[40rem] w-full border-4 border-[#FF6B35] p-2 md:p-6 bg-[#1C1917] rounded-[30px] md:-mt-16"
     >
       <div className="h-full w-full overflow-hidden rounded-2xl bg-[#FAF9F7] dark:bg-[#1C1917] md:p-4">
         {children}

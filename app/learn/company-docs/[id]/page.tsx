@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import { ArrowLeft, FileText, ExternalLink } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
@@ -21,17 +21,17 @@ type CompanyDoc = {
   created_at: string
 }
 
-export default function CompanyDocViewer({ params }: { params: Promise<{ id: string }> }) {
+export default function CompanyDocViewer() {
   const { user } = useAuth()
   const router = useRouter()
-  const [docId, setDocId] = useState<string | null>(null)
+  const routeParams = useParams<{ id?: string }>()
+  const docId = Array.isArray((routeParams as any)?.id)
+    ? ((routeParams as any)?.id[0] as string | undefined) ?? null
+    : (routeParams?.id as string | null) ?? null
+
   const [doc, setDoc] = useState<CompanyDoc | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    params.then(({ id }) => setDocId(id))
-  }, [params])
 
   const docTypeLabel = useMemo(() => {
     if (!doc) return ""
@@ -46,7 +46,12 @@ export default function CompanyDocViewer({ params }: { params: Promise<{ id: str
   }, [doc])
 
   useEffect(() => {
-    if (!docId || !user?.orgId || !user?.id) return
+    if (!docId) {
+      setError("Missing id")
+      setLoading(false)
+      return
+    }
+    if (!user?.orgId || !user?.id) return
 
     const load = async () => {
       setLoading(true)

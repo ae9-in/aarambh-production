@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { useParams } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   ArrowLeft,
@@ -60,7 +61,7 @@ interface MaterialItem {
   file_url: string | null
 }
 
-export default function LessonPage({ params }: { params: Promise<{ id: string }> }) {
+export default function LessonPage() {
   const { user } = useAuth()
   const [contentId, setContentId] = useState<string | null>(null)
   const [content, setContent] = useState<Content | null>(null)
@@ -69,6 +70,8 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
   const [error, setError] = useState<string | null>(null)
   const [materials, setMaterials] = useState<MaterialItem[]>([])
   const [quiz, setQuiz] = useState<Quiz | null>(null)
+
+  const routeParams = useParams<{ id?: string }>()
 
   // Video player state
   const [isPlaying, setIsPlaying] = useState(false)
@@ -89,8 +92,10 @@ export default function LessonPage({ params }: { params: Promise<{ id: string }>
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useEffect(() => {
-    params.then(({ id }) => setContentId(id))
-  }, [params])
+    const rawId = (routeParams as any)?.id
+    const id = Array.isArray(rawId) ? rawId[0] : rawId
+    setContentId(typeof id === "string" ? id : null)
+  }, [routeParams])
 
   useEffect(() => {
     if (!contentId || !user?.id) return

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
   Upload, Search, Filter, MoreVertical, FileText, Video, Music, Image as ImageIcon,
@@ -8,11 +8,15 @@ import {
   Grid3X3, List, Clock, HardDrive, CheckCircle2, AlertCircle
 } from "lucide-react"
 
+import { toast } from "sonner"
+import { useAuth } from "@/lib/auth-context"
+
 type FileItem = {
   id: string
   name: string
   type: "pdf" | "video" | "audio" | "image" | "document"
   size: string
+  fileUrl: string | null
   uploadedBy: string
   uploadedAt: string
   folder: string
@@ -25,27 +29,44 @@ type FolderItem = {
   color: string
 }
 
-const initialFolders: FolderItem[] = [
-  { id: "1", name: "HR Documents", fileCount: 12, color: "#FF6B35" },
-  { id: "2", name: "Training Videos", fileCount: 8, color: "#10B981" },
-  { id: "3", name: "Product Guides", fileCount: 15, color: "#6366F1" },
-  { id: "4", name: "Compliance", fileCount: 5, color: "#F59E0B" },
-]
+const initialFolders: FolderItem[] = []
+const initialFiles: FileItem[] = []
 
-const initialFiles: FileItem[] = [
-  { id: "1", name: "Employee Handbook 2024.pdf", type: "pdf", size: "2.4 MB", uploadedBy: "Admin", uploadedAt: "2 days ago", folder: "HR Documents" },
-  { id: "2", name: "Onboarding Welcome.mp4", type: "video", size: "156 MB", uploadedBy: "HR Team", uploadedAt: "5 days ago", folder: "Training Videos" },
-  { id: "3", name: "Product Demo.mp4", type: "video", size: "89 MB", uploadedBy: "Product", uploadedAt: "1 week ago", folder: "Product Guides" },
-  { id: "4", name: "Sales Presentation.pdf", type: "pdf", size: "4.8 MB", uploadedBy: "Sales", uploadedAt: "3 days ago", folder: "Product Guides" },
-  { id: "5", name: "Company Logo.png", type: "image", size: "256 KB", uploadedBy: "Design", uploadedAt: "2 weeks ago", folder: "HR Documents" },
-  { id: "6", name: "Podcast Episode 1.mp3", type: "audio", size: "45 MB", uploadedBy: "Marketing", uploadedAt: "1 day ago", folder: "Training Videos" },
-  { id: "7", name: "GDPR Compliance Guide.pdf", type: "pdf", size: "1.2 MB", uploadedBy: "Legal", uploadedAt: "3 weeks ago", folder: "Compliance" },
-  { id: "8", name: "Benefits Overview.docx", type: "document", size: "890 KB", uploadedBy: "HR Team", uploadedAt: "4 days ago", folder: "HR Documents" },
-]
+function formatBytes(input: unknown): string {
+  try {
+    const bytes = input == null ? 0n : BigInt(String(input))
+    const units = ["B", "KB", "MB", "GB", "TB"] as const
+    let value = bytes
+    let unitIndex = 0
+    while (value >= 1024n && unitIndex < units.length - 1) {
+      value = value / 1024n
+      unitIndex++
+    }
+    return `${value.toString()} ${units[unitIndex]}`
+  } catch {
+    return "—"
+  }
+}
+
+function timeAgo(isoOrMs: string | number): string {
+  const t = typeof isoOrMs === "number" ? isoOrMs : new Date(isoOrMs).getTime()
+  if (!Number.isFinite(t)) return "—"
+  const diffMs = Date.now() - t
+  const sec = Math.floor(diffMs / 1000)
+  if (sec < 60) return `${sec}s ago`
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const days = Math.floor(hr / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  return `${months}mo ago`
+}
 
 export default function FilesPage() {
   const [files, setFiles] = useState<FileItem[]>(initialFiles)
-  const [folders] = useState<FolderItem[]>(initialFolders)
+  const [folders, setFolders] = useState<FolderItem[]>(initialFolders)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<"grid" | "list">("list")
@@ -53,6 +74,13 @@ export default function FilesPage() {
   const [selectedFiles, setSelectedFiles] = useState<string[]>([])
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  const [storageTotal, setStorageTotal] = useState<string>("—")
+  const [storageUsed, setStorageUsed] = useState<string>("—")
+  const [storagePercent, setStoragePercent] = useState<number>(0)
+
+  const { user } = useAuth()
 
   const filteredFiles = files.filter(file => {
     const matchesSearch = file.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -69,6 +97,96 @@ export default function FilesPage() {
       default: return <FileText size={20} className="text-gray-500" />
     }
   }
+
+  const loadData = useCallback(async () => {
+    if (!user?.orgId || !user?.id) return
+
+    try {
+      setIsLoading(true)
+
+      const qs = new URLSearchParams({
+        orgId: user.orgId,
+        userId: user.id,
+        userRole: String(user.role ?? ""),
+      }).toString()
+
+      const [catRes, contentRes, storageRes] = await Promise.all([
+        fetch(`/api/categories?${qs}`, { credentials: "include" }),
+        fetch(`/api/content?${qs}`, { credentials: "include" }),
+        fetch(`/api/storage-usage?orgId=${encodeURIComponent(user.orgId)}`, { credentials: "include" }),
+      ])
+
+      if (!catRes.ok) {
+        const data = await catRes.json().catch(() => null)
+        throw new Error(data?.error || "Failed to load folders")
+      }
+      if (!contentRes.ok) {
+        const data = await contentRes.json().catch(() => null)
+        throw new Error(data?.error || "Failed to load files")
+      }
+
+      const catJson = await catRes.json()
+      const contentJson = await contentRes.json()
+      const storageJson = storageRes.ok ? await storageRes.json().catch(() => null) : null
+
+      const cats: any[] = catJson?.categories ?? []
+      setFolders(
+        cats.map((c) => ({
+          id: String(c.id),
+          name: String(c.name ?? "Category"),
+          fileCount: Number(c.lesson_count ?? c.lessonCount ?? 0),
+          color: String(c.color ?? "#FF6B35"),
+        })),
+      )
+
+      const contentRows: any[] = contentJson?.content ?? []
+      const typeMap: Record<string, FileItem["type"]> = {
+        VIDEO: "video",
+        PDF: "pdf",
+        AUDIO: "audio",
+        IMAGE: "image",
+        NOTE: "document",
+        PPT: "document",
+        LINK: "document",
+        QUIZ: "document",
+      }
+
+      const mappedFiles: FileItem[] = contentRows.map((r) => {
+        const kind = typeMap[String(r.type)] ?? "document"
+        return {
+          id: String(r.id),
+          name: String(r.title ?? "Untitled"),
+          type: kind,
+          size: formatBytes(r.file_size),
+          fileUrl: r.file_url ? String(r.file_url) : null,
+          uploadedBy: String(r.uploader_name ?? "Unknown"),
+          uploadedAt: timeAgo(r.created_at),
+          folder: String(r.category_name ?? "Uncategorized"),
+        }
+      })
+      setFiles(mappedFiles)
+
+      if (storageJson?.totalStorageGb != null) {
+        setStorageTotal(`${Number(storageJson.totalStorageGb).toFixed(0)} GB`)
+        setStorageUsed(`${storageJson.usedStorageGb ?? "0"} GB`)
+        setStoragePercent(Number(storageJson.percent ?? 0))
+      }
+    } catch (e: any) {
+      console.error(e)
+      toast.error(e?.message || "Failed to load file library.")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [user?.id, user?.orgId, user?.role])
+
+  useEffect(() => {
+    if (!user?.orgId || !user?.id) return
+    void loadData()
+    const t = setInterval(() => {
+      void loadData()
+    }, 5000)
+    return () => clearInterval(t)
+  }, [user?.orgId, user?.id, loadData])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -104,20 +222,24 @@ export default function FilesPage() {
     )
   }
 
-  const handleDelete = (id: string) => {
-    setFiles(files.filter(f => f.id !== id))
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this content item?")) return
+    try {
+      const res = await fetch(`/api/content/${id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || "Failed to delete")
+      }
+      await loadData()
+      toast.success("Deleted.")
+    } catch (e: any) {
+      toast.error(e?.message || "Delete failed.")
+    }
   }
-
-  const totalStorage = "2.4 GB"
-  const usedStorage = "1.8 GB"
-  const storagePercent = 75
 
   return (
     <div 
       className="min-h-screen p-3 sm:p-4 md:p-8"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
     >
       {/* Drag overlay */}
       <AnimatePresence>
@@ -208,7 +330,7 @@ export default function FilesPage() {
             </div>
             <div>
               <p className="font-semibold text-[#1C1917]">Storage</p>
-              <p className="text-sm text-[#78716C]">{usedStorage} of {totalStorage} used</p>
+              <p className="text-sm text-[#78716C]">{storageUsed} of {storageTotal} used</p>
             </div>
           </div>
           <span className="text-2xl font-bold text-[#1C1917]">{storagePercent}%</span>
@@ -326,80 +448,108 @@ export default function FilesPage() {
           {/* Files */}
           {viewMode === "grid" ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
-              <AnimatePresence mode="popLayout">
-                {filteredFiles.map((file, i) => (
-                  <motion.div
-                    key={file.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    transition={{ delay: i * 0.03 }}
-                    className={`group bg-white rounded-2xl border p-4 cursor-pointer transition-all ${
-                      selectedFiles.includes(file.id) 
-                        ? "border-[#FF6B35] shadow-lg shadow-[#FF6B35]/10" 
-                        : "border-[#E7E5E4] hover:border-[#FF6B35]/30"
-                    }`}
-                    onClick={() => toggleFileSelection(file.id)}
-                  >
-                    <div className="h-24 bg-[#F9FAFB] rounded-xl flex items-center justify-center mb-3 relative">
-                      {getFileIcon(file.type)}
-                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDelete(file.id) }}
-                          className="p-1.5 bg-white rounded-lg shadow-md hover:bg-red-50 transition-colors"
-                        >
-                          <Trash2 size={14} className="text-red-500" />
-                        </button>
-                      </div>
-                    </div>
-                    <h4 className="font-medium text-[#1C1917] text-sm truncate">{file.name}</h4>
-                    <div className="flex items-center justify-between mt-2 text-xs text-[#78716C]">
-                      <span>{file.size}</span>
-                      <span>{file.uploadedAt}</span>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-          ) : (
-            <div className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white">
-              <div className="space-y-2 p-3 md:hidden">
-                <AnimatePresence>
+              {filteredFiles.length === 0 ? (
+                <div className="col-span-full text-center py-12 text-[#78716C]">
+                  No files found.
+                </div>
+              ) : (
+                <AnimatePresence mode="popLayout">
                   {filteredFiles.map((file, i) => (
                     <motion.div
-                      key={`mobile-${file.id}`}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ delay: i * 0.02 }}
-                      className="rounded-xl border border-[#E7E5E4] bg-white p-3"
+                      key={file.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ delay: i * 0.03 }}
+                      className={`group bg-white rounded-2xl border p-4 cursor-pointer transition-all ${
+                        selectedFiles.includes(file.id)
+                          ? "border-[#FF6B35] shadow-lg shadow-[#FF6B35]/10"
+                          : "border-[#E7E5E4] hover:border-[#FF6B35]/30"
+                      }`}
+                      onClick={() => toggleFileSelection(file.id)}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F5F5F4]">
-                          {getFileIcon(file.type)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-[#1C1917]">{file.name}</p>
-                          <p className="text-xs text-[#78716C]">{file.size} • {file.uploadedAt}</p>
+                      <div className="h-24 bg-[#F9FAFB] rounded-xl flex items-center justify-center mb-3 relative">
+                        {getFileIcon(file.type)}
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(file.id) }}
+                            className="p-1.5 bg-white rounded-lg shadow-md hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={14} className="text-red-500" />
+                          </button>
                         </div>
                       </div>
-                      <div className="mt-2 text-xs text-[#78716C]">
-                        Uploaded by {file.uploadedBy}
-                      </div>
-                      <div className="mt-3 flex items-center gap-2">
-                        <button className="rounded-lg border border-[#E7E5E4] px-3 py-2 text-xs text-[#1C1917]">View</button>
-                        <button className="rounded-lg border border-[#E7E5E4] px-3 py-2 text-xs text-[#1C1917]">Download</button>
-                        <button
-                          onClick={() => handleDelete(file.id)}
-                          className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600"
-                        >
-                          Delete
-                        </button>
+                      <h4 className="font-medium text-[#1C1917] text-sm truncate">{file.name}</h4>
+                      <div className="flex items-center justify-between mt-2 text-xs text-[#78716C]">
+                        <span>{file.size}</span>
+                        <span>{file.uploadedAt}</span>
                       </div>
                     </motion.div>
                   ))}
                 </AnimatePresence>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white">
+              <div className="space-y-2 p-3 md:hidden">
+                {filteredFiles.length === 0 ? (
+                  <div className="py-12 text-center text-[#78716C]">No files found.</div>
+                ) : (
+                  <AnimatePresence>
+                    {filteredFiles.map((file, i) => (
+                      <motion.div
+                        key={`mobile-${file.id}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ delay: i * 0.02 }}
+                        className="rounded-xl border border-[#E7E5E4] bg-white p-3"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#F5F5F4]">
+                            {getFileIcon(file.type)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-[#1C1917]">{file.name}</p>
+                            <p className="text-xs text-[#78716C]">{file.size} • {file.uploadedAt}</p>
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs text-[#78716C]">
+                          Uploaded by {file.uploadedBy}
+                        </div>
+                        <div className="mt-3 flex items-center gap-2">
+                          <button
+                            className="rounded-lg border border-[#E7E5E4] px-3 py-2 text-xs text-[#1C1917]"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (file.fileUrl) window.open(file.fileUrl, "_blank", "noopener,noreferrer")
+                              else toast.error("File URL not available.")
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            className="rounded-lg border border-[#E7E5E4] px-3 py-2 text-xs text-[#1C1917]"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (file.fileUrl) window.open(file.fileUrl, "_blank", "noopener,noreferrer")
+                              else toast.error("File URL not available.")
+                            }}
+                          >
+                            Download
+                          </button>
+                          <button
+                            onClick={() => handleDelete(file.id)}
+                            className="rounded-lg border border-red-200 px-3 py-2 text-xs text-red-600"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                )}
               </div>
 
               <table className="hidden w-full md:table">
@@ -416,57 +566,87 @@ export default function FilesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  <AnimatePresence>
-                    {filteredFiles.map((file, i) => (
-                      <motion.tr
-                        key={file.id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        transition={{ delay: i * 0.02 }}
-                        className="border-b border-[#E7E5E4] hover:bg-[#F9FAFB] transition-colors group"
-                      >
-                        <td className="px-4 py-3">
-                          <input 
-                            type="checkbox" 
-                            checked={selectedFiles.includes(file.id)}
-                            onChange={() => toggleFileSelection(file.id)}
-                            className="rounded border-[#E7E5E4]" 
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-[#F5F5F4] flex items-center justify-center">
-                              {getFileIcon(file.type)}
+                  {filteredFiles.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-10 text-center text-[#78716C]">
+                        No files found.
+                      </td>
+                    </tr>
+                  ) : (
+                    <AnimatePresence>
+                      {filteredFiles.map((file, i) => (
+                        <motion.tr
+                          key={file.id}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0, x: -20 }}
+                          transition={{ delay: i * 0.02 }}
+                          className="border-b border-[#E7E5E4] hover:bg-[#F9FAFB] transition-colors group"
+                        >
+                          <td className="px-4 py-3">
+                            <input
+                              type="checkbox"
+                              checked={selectedFiles.includes(file.id)}
+                              onChange={() => toggleFileSelection(file.id)}
+                              className="rounded border-[#E7E5E4]"
+                            />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-[#F5F5F4] flex items-center justify-center">
+                                {getFileIcon(file.type)}
+                              </div>
+                              <span className="font-medium text-[#1C1917]">{file.name}</span>
                             </div>
-                            <span className="font-medium text-[#1C1917]">{file.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-[#78716C]">{file.size}</td>
-                        <td className="px-4 py-3 text-sm text-[#78716C]">{file.uploadedBy}</td>
-                        <td className="px-4 py-3 text-sm text-[#78716C]">{file.uploadedAt}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button className="p-2 hover:bg-[#E7E5E4] rounded-lg transition-colors">
-                              <Eye size={16} className="text-[#78716C]" />
-                            </button>
-                            <button className="p-2 hover:bg-[#E7E5E4] rounded-lg transition-colors">
-                              <Download size={16} className="text-[#78716C]" />
-                            </button>
-                            <button className="p-2 hover:bg-[#E7E5E4] rounded-lg transition-colors">
-                              <Share2 size={16} className="text-[#78716C]" />
-                            </button>
-                            <button 
-                              onClick={() => handleDelete(file.id)}
-                              className="p-2 hover:bg-red-100 rounded-lg transition-colors"
-                            >
-                              <Trash2 size={16} className="text-red-500" />
-                            </button>
-                          </div>
-                        </td>
-                      </motion.tr>
-                    ))}
-                  </AnimatePresence>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-[#78716C]">{file.size}</td>
+                          <td className="px-4 py-3 text-sm text-[#78716C]">{file.uploadedBy}</td>
+                          <td className="px-4 py-3 text-sm text-[#78716C]">{file.uploadedAt}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                className="p-2 hover:bg-[#E7E5E4] rounded-lg transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (file.fileUrl)
+                                    window.open(file.fileUrl, "_blank", "noopener,noreferrer")
+                                  else toast.error("File URL not available.")
+                                }}
+                              >
+                                <Eye size={16} className="text-[#78716C]" />
+                              </button>
+                              <button
+                                className="p-2 hover:bg-[#E7E5E4] rounded-lg transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  if (file.fileUrl)
+                                    window.open(file.fileUrl, "_blank", "noopener,noreferrer")
+                                  else toast.error("File URL not available.")
+                                }}
+                              >
+                                <Download size={16} className="text-[#78716C]" />
+                              </button>
+                              <button
+                                className="p-2 hover:bg-[#E7E5E4] rounded-lg transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toast.info("Sharing is not wired up yet.")
+                                }}
+                              >
+                                <Share2 size={16} className="text-[#78716C]" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(file.id)}
+                                className="p-2 hover:bg-red-100 rounded-lg transition-colors"
+                              >
+                                <Trash2 size={16} className="text-red-500" />
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </AnimatePresence>
+                  )}
                 </tbody>
               </table>
             </div>

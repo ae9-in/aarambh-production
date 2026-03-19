@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { useParams } from "next/navigation"
 import { motion } from "framer-motion"
 import {
   ArrowLeft,
@@ -87,7 +88,7 @@ function formatDuration(minutes: number | null): string {
   return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`
 }
 
-export default function LearningPathPage({ params }: { params: Promise<{ id: string }> }) {
+export default function LearningPathPage() {
   const { user } = useAuth()
   const [categoryId, setCategoryId] = useState<string | null>(null)
   const [category, setCategory] = useState<Category | null>(null)
@@ -95,9 +96,13 @@ export default function LearningPathPage({ params }: { params: Promise<{ id: str
   const [progress, setProgress] = useState<UserProgress[]>([])
   const [loading, setLoading] = useState(true)
 
+  const routeParams = useParams<{ id?: string }>()
+
   useEffect(() => {
-    params.then(({ id }) => setCategoryId(id))
-  }, [params])
+    const rawId = (routeParams as any)?.id
+    const id = Array.isArray(rawId) ? rawId[0] : rawId
+    setCategoryId(typeof id === "string" ? id : null)
+  }, [routeParams])
 
   useEffect(() => {
     if (!categoryId || !user?.id || !user?.orgId) return

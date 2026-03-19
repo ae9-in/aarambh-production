@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
       description,
       fileUrl,
       firebasePath,
+      storagePath,
       mimeType,
       userId,
     }: {
@@ -73,6 +74,7 @@ export async function POST(req: NextRequest) {
       description?: string | null
       fileUrl?: string
       firebasePath?: string | null
+      storagePath?: string | null
       mimeType?: string | null
       userId?: string
     } = body
@@ -99,7 +101,7 @@ export async function POST(req: NextRequest) {
         title,
         description: description ?? null,
         file_url: fileUrl,
-        firebase_path: firebasePath ?? null,
+        firebase_path: storagePath ?? firebasePath ?? null,
         mime_type: mimeType ?? null,
         uploaded_by: userId,
         is_published: true,

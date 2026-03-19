@@ -7,11 +7,15 @@ function isAdminRole(role?: string | null) {
   return ["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(role || "")
 }
 
+const COMPANY_DOCS_BUCKET = process.env.SUPABASE_COMPANY_DOCS_BUCKET || "company-docs"
+
 type RouteParams = { params: { id: string } }
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
   try {
-    const docId = params.id
+    // Avoid accessing `params.id` directly (Next may provide it as a Promise).
+    // We can always read it from the pathname.
+    const docId = req.nextUrl.pathname.split("/").filter(Boolean).pop() ?? undefined
     const { searchParams } = req.nextUrl
     const orgId = searchParams.get("orgId")
     const userId = searchParams.get("userId")
@@ -51,7 +55,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
   try {
-    const docId = params.id
+    const docId = req.nextUrl.pathname.split("/").filter(Boolean).pop() ?? undefined
     const body = await req.json().catch(() => ({}))
     const { userId, orgId }: { userId?: string; orgId?: string } = body || {}
 
@@ -78,14 +82,14 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     if (error || !doc) return NextResponse.json({ error: "Document not found" }, { status: 404 })
 
     if (doc.firebase_path) {
-      // Delete file from Firebase Storage.
-      // (We keep it simple here; actual deletion is handled via Firebase Admin inside `app/api/upload`.)
-      const { getAdminStorage } = await import("@/lib/firebase-admin")
-      const storage = getAdminStorage()
-      const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "arambh-prod.appspot.com"
-      await storage.bucket(bucketName).file(doc.firebase_path).delete().catch((e) => {
-        console.error("company-docs DELETE firebase file error:", e)
-      })
+      await supabaseAdmin.storage
+        .from(COMPANY_DOCS_BUCKET)
+        .remove([doc.firebase_path])
+        .then(({ error: storageDeleteError }) => {
+          if (storageDeleteError) {
+            console.error("company-docs DELETE storage file error:", storageDeleteError)
+          }
+        })
     }
 
     const { error: deleteError } = await supabaseAdmin.from("company_documents").delete().eq("id", docId)

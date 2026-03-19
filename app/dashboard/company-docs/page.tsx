@@ -5,7 +5,6 @@ import { motion } from "framer-motion"
 import { FileText, Trash2, Upload, X } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { toast } from "sonner"
-import { detectType } from "@/lib/firebase"
 
 type DocType = "SOP" | "LEAVE_POLICY" | "LEAVE_CALENDAR" | "OTHER"
 
@@ -21,13 +20,12 @@ type CompanyDoc = {
   created_at: string
 }
 
-async function uploadDocToFirebase(file: File, orgId: string) {
+async function uploadDocToSupabase(file: File, orgId: string) {
   const fd = new FormData()
   fd.append("file", file)
   fd.append("orgId", orgId)
-  fd.append("fileType", detectType(file.type || "", file.name))
 
-  const res = await fetch("/api/upload/lesson-file", {
+  const res = await fetch("/api/upload/company-doc", {
     method: "POST",
     body: fd,
   })
@@ -108,7 +106,7 @@ export default function CompanyDocsAdminPage() {
     try {
       setUploading(true)
 
-      const { url, path } = await uploadDocToFirebase(file, user.orgId)
+      const { url, path } = await uploadDocToSupabase(file, user.orgId)
 
       const res = await fetch("/api/company-docs", {
         method: "POST",
@@ -119,7 +117,7 @@ export default function CompanyDocsAdminPage() {
           title: title.trim(),
           description: description.trim() ? description.trim() : null,
           fileUrl: url,
-          firebasePath: path,
+          storagePath: path,
           mimeType: file.type || null,
           userId: user.id,
         }),

@@ -29,7 +29,7 @@ export function Navbar() {
       transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
     >
       <motion.div
-        className="glass px-4 py-1.5 rounded-full flex items-center gap-5"
+        className="glass px-6 py-2.5 rounded-full flex items-center gap-7"
         style={{ boxShadow: shadow }}
       >
         {/* Logo */}
@@ -65,7 +65,7 @@ export function Navbar() {
             <a
               key={link.name}
               href={link.href}
-              className="text-xs font-medium text-[#78716C] hover:text-[#1C1917] underline-animation transition-colors duration-200"
+              className="text-[15px] font-medium text-[#78716C] hover:text-[#1C1917] underline-animation transition-colors duration-200"
             >
               {link.name}
             </a>
@@ -74,7 +74,7 @@ export function Navbar() {
 
         {/* CTA Button */}
         <motion.button
-          className="hidden md:flex items-center gap-1 bg-[#FF6B35] text-white px-3.5 py-1 rounded-full text-xs font-semibold relative overflow-hidden btn-scale"
+          className="hidden md:flex items-center gap-1 bg-[#FF6B35] text-white px-5 py-2 rounded-full text-[15px] font-semibold relative overflow-hidden btn-scale"
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.97 }}
           onClick={() => router.push("/register")}
