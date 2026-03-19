@@ -1,6 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  distDir: ".next-build",
   experimental: {
     proxyClientMaxBodySize: 600 * 1024 * 1024,
   },
