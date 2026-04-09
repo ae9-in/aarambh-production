@@ -11,6 +11,10 @@ type RouteParams = {
   }>
 }
 
+function isDeleteAdminRole(role?: string | null): boolean {
+  return role === 'ADMIN' || role === 'SUPER_ADMIN'
+}
+
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const auth = await requireAuth(req)
   const { id } = await params
@@ -205,6 +209,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(_req: NextRequest, { params }: RouteParams) {
   const auth = await requireAuth(_req)
+  if (!isDeleteAdminRole(auth.role)) {
+    return NextResponse.json({ error: 'Only admins can delete files' }, { status: 403 })
+  }
   const { id } = await params
 
   const {
@@ -244,4 +251,3 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
 
   return NextResponse.json({ deleted: true }, { status: 200 })
 }
-
