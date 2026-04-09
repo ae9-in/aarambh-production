@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 
 const ALLOWED_ORIGINS = new Set([
   "https://arambh-lemon.vercel.app",
+  "https://aarambh-production.vercel.app",
   "http://localhost:3000",
+  "http://localhost:3001",
   "https://localhost:3000",
 ])
 
@@ -14,4 +16,3 @@ export function enforceCors(req: NextRequest): NextResponse | null {
   }
   return null
 }
-
