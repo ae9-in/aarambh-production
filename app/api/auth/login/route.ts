@@ -22,12 +22,14 @@ export async function POST(req: NextRequest) {
     const password = body?.password?.toString()
 
     if (!email || !password) {
+      console.log("[login] Missing email or password");
       return NextResponse.json(
         { error: "Invalid email or password." },
         { status: 400 },
       )
     }
     if (!isEmail(email)) {
+      console.log("[login] Invalid email format");
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 })
     }
 
@@ -38,6 +40,7 @@ export async function POST(req: NextRequest) {
       process.env.SUPABASE_ANON_KEY ||
       process.env.SUPABASE_SERVICE_ROLE_KEY
     if (!supabaseUrl || !supabaseClientKey) {
+      console.log("[login] Missing Supabase env variables");
       return NextResponse.json(
         { error: "Login is temporarily unavailable. Please contact admin." },
         { status: 503 },
@@ -52,6 +55,7 @@ export async function POST(req: NextRequest) {
       await authClient.auth.signInWithPassword({ email, password })
 
     if (authError || !authData.user) {
+      console.log("[login] Supabase auth error:", authError?.message || "No user returned");
       return NextResponse.json(
         { error: "Invalid email or password." },
         { status: 401 },
@@ -60,6 +64,7 @@ export async function POST(req: NextRequest) {
 
     const accessToken = authData.session?.access_token
     if (!accessToken) {
+      console.log("[login] Missing access token after login");
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 })
     }
 
@@ -75,7 +80,7 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (profileError || !profile) {
-      console.error("[login] profile query error:", profileError?.message)
+      console.error("[login] profile query error:", profileError?.message || "No profile returned");
       return NextResponse.json(
         { error: "Invalid email or password." },
         { status: 401 },
@@ -83,6 +88,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (profile.status === "pending") {
+      console.log("[login] Profile status is pending");
       return NextResponse.json(
         {
           error: "Invalid email or password.",
@@ -92,6 +98,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (profile.status === "inactive") {
+      console.log("[login] Profile status is inactive");
       return NextResponse.json(
         { error: "Invalid email or password." },
         { status: 401 },

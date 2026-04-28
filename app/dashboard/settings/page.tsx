@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { 
   Building2, User, Bell, Shield, Palette, Globe, CreditCard, 
   Key, Mail, Smartphone, Save, Camera, Check, X, Loader2,
-  Moon, Sun, Monitor, Upload, Trash2, AlertTriangle, ChevronRight
+  Moon, Sun, Monitor, Upload, Trash2, AlertTriangle, ChevronRight,
+  UserCircle
 } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { toast } from "sonner"
@@ -60,6 +61,70 @@ export default function SettingsPage() {
   const [accessCategories, setAccessCategories] = useState<AccessCategory[]>([])
   const [roleDefaults, setRoleDefaults] = useState<Record<string, string[]>>({})
   const [savingRoleKey, setSavingRoleKey] = useState<string | null>(null)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false)
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
+
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (user?.avatar_url) setAvatarUrl(user.avatar_url)
+  }, [user?.avatar_url])
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !user?.orgId) return
+
+    try {
+      setIsUploadingLogo(true)
+      const fd = new FormData()
+      fd.append("file", file)
+      fd.append("orgId", user.orgId)
+      fd.append("type", "COMPANY_LOGO")
+
+      const res = await fetch("/api/upload/company-doc", {
+        method: "POST",
+        body: fd,
+      })
+
+      if (!res.ok) throw new Error("Upload failed")
+      const data = await res.json()
+      setLogoUrl(data.url)
+      toast.success("Logo uploaded successfully")
+    } catch (err) {
+      toast.error("Failed to upload logo")
+    } finally {
+      setIsUploadingLogo(false)
+    }
+  }
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !user?.id) return
+
+    try {
+      setIsUploadingAvatar(true)
+      const fd = new FormData()
+      fd.append("file", file)
+      fd.append("userId", user.id)
+
+      const res = await fetch("/api/upload/avatar", {
+        method: "POST",
+        body: fd,
+      })
+
+      if (!res.ok) throw new Error("Upload failed")
+      const data = await res.json()
+      setAvatarUrl(data.avatarUrl)
+      toast.success("Profile photo updated")
+    } catch (err) {
+      toast.error("Failed to update profile photo")
+    } finally {
+      setIsUploadingAvatar(false)
+    }
+  }
 
   useEffect(() => {
     if (!user?.orgId) return
@@ -127,18 +192,36 @@ export default function SettingsPage() {
             {/* Company Logo */}
             <div className="flex items-start gap-6 p-6 bg-[#F9FAFB] rounded-2xl">
               <div className="relative">
-                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[#FF6B35] to-[#C8A96E] flex items-center justify-center text-white text-2xl font-bold">
-                  AC
+                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[#FF6B35] to-[#C8A96E] flex items-center justify-center text-white text-2xl font-bold overflow-hidden">
+                  {logoUrl ? (
+                    <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
+                  ) : (
+                    "AC"
+                  )}
                 </div>
-                <button className="absolute -bottom-2 -right-2 p-2 bg-white rounded-full shadow-lg border border-[#E7E5E4] hover:bg-[#F5F5F4] transition-colors">
+                <button 
+                  onClick={() => logoInputRef.current?.click()}
+                  className="absolute -bottom-2 -right-2 p-2 bg-white rounded-full shadow-lg border border-[#E7E5E4] hover:bg-[#F5F5F4] transition-colors"
+                >
                   <Camera size={14} className="text-[#78716C]" />
                 </button>
               </div>
               <div>
                 <h4 className="font-medium text-[#1C1917]">Company Logo</h4>
                 <p className="text-sm text-[#78716C] mt-1">PNG, JPG up to 2MB. Recommended 200x200px</p>
-                <button className="mt-3 text-sm text-[#FF6B35] font-medium hover:underline">
-                  Upload new logo
+                <input 
+                  type="file" 
+                  ref={logoInputRef} 
+                  onChange={handleLogoUpload} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
+                <button 
+                  onClick={() => logoInputRef.current?.click()}
+                  disabled={isUploadingLogo}
+                  className="mt-3 text-sm text-[#FF6B35] font-medium hover:underline disabled:opacity-50"
+                >
+                  {isUploadingLogo ? "Uploading..." : "Upload new logo"}
                 </button>
               </div>
             </div>
@@ -289,16 +372,36 @@ export default function SettingsPage() {
             {/* Avatar */}
             <div className="flex items-center gap-6 p-6 bg-[#F9FAFB] rounded-2xl">
               <div className="relative">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FF6B35] to-[#C8A96E]" />
-                <button className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow-lg border border-[#E7E5E4]">
+                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-[#FF6B35] to-[#C8A96E] flex items-center justify-center overflow-hidden">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <UserCircle className="w-16 h-16 text-white/50" />
+                  )}
+                </div>
+                <button 
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="absolute bottom-0 right-0 p-2 bg-white rounded-full shadow-lg border border-[#E7E5E4]"
+                >
                   <Camera size={16} className="text-[#78716C]" />
                 </button>
               </div>
               <div>
-                <h4 className="font-semibold text-[#1C1917]">Admin User</h4>
-                <p className="text-sm text-[#78716C]">admin@acme.com</p>
-                <button className="mt-2 text-sm text-[#FF6B35] font-medium hover:underline">
-                  Change photo
+                <h4 className="font-semibold text-[#1C1917]">{user?.full_name || "User"}</h4>
+                <p className="text-sm text-[#78716C]">{user?.email}</p>
+                <input 
+                  type="file" 
+                  ref={avatarInputRef} 
+                  onChange={handleAvatarUpload} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
+                <button 
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={isUploadingAvatar}
+                  className="mt-2 text-sm text-[#FF6B35] font-medium hover:underline disabled:opacity-50"
+                >
+                  {isUploadingAvatar ? "Updating..." : "Change photo"}
                 </button>
               </div>
             </div>

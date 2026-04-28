@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { uploadToCloudinary, detectType, detectResourceType } from '@/lib/cloudinary'
 
+export const maxDuration = 300
+
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData()

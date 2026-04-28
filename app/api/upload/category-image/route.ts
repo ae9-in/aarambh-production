@@ -16,6 +16,8 @@ cloudinary.config({
   secure: true,
 })
 
+export const maxDuration = 300
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData()
@@ -41,12 +43,13 @@ export async function POST(req: Request) {
 
     const ts = Date.now()
     const clean = file.name.toLowerCase().replace(/[^a-z0-9.]/g, "-").replace(/-+/g, "-")
-    const publicId = `orgs/${orgId}/categories/${ts}-${clean}`.replace(/\.[^.]+$/, "")
+    const folder = `arambh/orgs/${orgId}/categories`
+    const publicId = `${ts}-${clean}`.replace(/\.[^.]+$/, "")
 
     const result = await new Promise<cloudinary.UploadApiResponse>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
         {
-          folder: undefined,
+          folder: folder,
           public_id: publicId,
           resource_type: "image",
         },

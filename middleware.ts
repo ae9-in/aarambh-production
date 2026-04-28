@@ -61,7 +61,10 @@ export function middleware(request: NextRequest) {
     const isPublicApi =
       pathname === '/api/auth/login' ||
       pathname === '/api/auth/register' ||
+      pathname.includes('/api/debug/') ||
+      pathname.includes('/api/setup/') ||
       (pathname === '/api/enquiries' && request.method === 'POST')
+    
     if (!isPublicApi) {
       const authCookie = request.cookies.get('arambh_user')
       if (!authCookie?.value) {

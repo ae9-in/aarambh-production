@@ -969,18 +969,11 @@ export default function FilesPage() {
 
                 {/* Drop zone */}
                 <div 
-                  className={`cursor-pointer rounded-2xl border-2 border-dashed p-6 text-center transition-colors sm:p-12 ${
+                  className={`rounded-2xl border-2 border-dashed p-6 text-center transition-colors sm:p-12 ${
                     !uploadFolderId 
                       ? "border-[#D6D3D1] bg-[#FAFAF9] cursor-not-allowed opacity-60" 
-                      : "border-[#E7E5E4] hover:border-[#FF6B35]"
+                      : "border-[#E7E5E4] hover:border-[#FF6B35] cursor-pointer"
                   }`}
-                  onClick={() => {
-                    if (!uploadFolderId) {
-                      toast.error("Please select or create a folder first.")
-                      return
-                    }
-                    fileInputRef.current?.click()
-                  }}
                   onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                   onDrop={(e) => {
                     e.preventDefault()
@@ -1000,20 +993,27 @@ export default function FilesPage() {
                   <input 
                     type="file" 
                     multiple 
+                    id="file-library-upload-input"
                     ref={fileInputRef}
                     onChange={onFileChange}
-                    accept=".pdf,.doc,.docx,.mp4,.mp3,.png,.jpg,.jpeg,.gif,.webp,.ppt,.pptx"
+                    accept=".pdf,.doc,.docx,.mp4,.mp3,.png,.jpg,.jpeg,.gif,.webp,.ppt,.pptx,.wav,.m4a,.mov,.webm,.avif"
                     className="hidden"
                   />
                   <button 
+                    type="button"
+                    id="file-library-browse-btn"
                     disabled={isUploading || !uploadFolderId}
                     onClick={(e) => {
+                      e.preventDefault()
                       e.stopPropagation()
                       if (!uploadFolderId) {
                         toast.error("Please select or create a folder first.")
                         return
                       }
-                      fileInputRef.current?.click()
+                      // Use setTimeout to ensure the click is not swallowed by the browser
+                      setTimeout(() => {
+                        fileInputRef.current?.click()
+                      }, 0)
                     }}
                     className="px-6 py-2.5 bg-[#FF6B35] text-white font-medium rounded-xl hover:bg-[#E85520] transition-colors disabled:opacity-50"
                   >
