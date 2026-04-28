@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm show *)",
+      "Bash(node -e \"const v=JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); const filtered=v.filter\\(x=>x.startsWith\\('15.'\\)\\).slice\\(-10\\); console.log\\(filtered.join\\('\\\\n'\\)\\);\")",
+      "Bash(node -e \"const chunks=[]; process.stdin.on\\('data',c=>chunks.push\\(c\\)\\); process.stdin.on\\('end',\\(\\)=>{ const v=JSON.parse\\(chunks.join\\(''\\)\\); const f=v.filter\\(x=>x.startsWith\\('15.'\\)\\).slice\\(-15\\); console.log\\(f.join\\('\\\\n'\\)\\); }\\);\")",
+      "Bash(node -e \"const chunks=[]; process.stdin.on\\('data',c=>chunks.push\\(c\\)\\); process.stdin.on\\('end',\\(\\)=>{ const v=JSON.parse\\(chunks.join\\(''\\)\\); const f=v.filter\\(x=>x.startsWith\\('15.'\\) && !x.includes\\('canary'\\) && !x.includes\\('rc'\\) && !x.includes\\('beta'\\)\\).slice\\(-15\\); console.log\\(f.join\\('\\\\n'\\)\\); }\\);\")",
+      "Bash(npm install *)",
+      "PowerShell(Stop-Process *)",
+      "Bash(npm audit *)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('next:', p.dependencies.next\\);\")",
+      "Bash(node -e \"const p=require\\('./package-lock.json'\\); console.log\\('next lockfile version:', p.packages['node_modules/next']?.version\\);\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
+    ]
+  }
+}

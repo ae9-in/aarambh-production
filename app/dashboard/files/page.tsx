@@ -98,6 +98,7 @@ export default function FilesPage() {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<PendingDelete>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [selectedFileForPreview, setSelectedFileForPreview] = useState<FileItem | null>(null)
 
   const [storageTotal, setStorageTotal] = useState<string>("—")
   const [storageUsed, setStorageUsed] = useState<string>("—")
@@ -119,6 +120,24 @@ export default function FilesPage() {
       case "image": return <ImageIcon size={20} className="text-blue-500" />
       default: return <FileText size={20} className="text-gray-500" />
     }
+  }
+
+  const getDocumentViewerUrl = (fileUrl: string, type?: string): string => {
+    const lowerUrl = fileUrl.toLowerCase()
+    const upperType = String(type || "").toUpperCase()
+
+    if (upperType === "PDF" || lowerUrl.endsWith(".pdf")) {
+      return fileUrl
+    }
+
+    // Office viewer for ppt/pptx/doc/docx/xls/xlsx
+    const officeExtensions = [".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx"]
+    if (officeExtensions.some((ext) => lowerUrl.includes(ext))) {
+      return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`
+    }
+
+    // Fallback viewer for other raw docs
+    return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(fileUrl)}`
   }
 
   const loadData = useCallback(async () => {
@@ -766,7 +785,7 @@ export default function FilesPage() {
                             className="rounded-lg border border-[#E7E5E4] px-3 py-2 text-xs text-[#1C1917]"
                             onClick={(e) => {
                               e.stopPropagation()
-                              if (file.fileUrl) window.open(file.fileUrl, "_blank", "noopener,noreferrer")
+                              if (file.fileUrl) setSelectedFileForPreview(file)
                               else toast.error("File URL not available.")
                             }}
                           >
@@ -855,7 +874,7 @@ export default function FilesPage() {
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   if (file.fileUrl)
-                                    window.open(file.fileUrl, "_blank", "noopener,noreferrer")
+                                    setSelectedFileForPreview(file)
                                   else toast.error("File URL not available.")
                                 }}
                               >
@@ -1229,6 +1248,85 @@ export default function FilesPage() {
                     </>
                   )}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── File Preview Modal ─── */}
+      <AnimatePresence>
+        {selectedFileForPreview && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4 md:p-8"
+            onClick={() => setSelectedFileForPreview(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-6xl h-full max-h-[90vh] bg-[#1C1917] rounded-3xl overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Preview Header */}
+              <div className="flex items-center justify-between p-4 border-b border-white/10 bg-[#1C1917]">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
+                    {getFileIcon(selectedFileForPreview.type)}
+                  </div>
+                  <div>
+                    <h3 className="text-white font-semibold truncate max-w-[200px] sm:max-w-md">
+                      {selectedFileForPreview.name}
+                    </h3>
+                    <p className="text-white/40 text-xs">
+                      {selectedFileForPreview.type.toUpperCase()} • {selectedFileForPreview.size}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={selectedFileForPreview.fileUrl!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors"
+                    title="Download original"
+                  >
+                    <Download size={20} />
+                  </a>
+                  <button
+                    onClick={() => setSelectedFileForPreview(null)}
+                    className="p-2 bg-white/10 text-white rounded-lg hover:bg-red-500 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Preview Content */}
+              <div className="flex-1 bg-black flex items-center justify-center overflow-hidden">
+                {selectedFileForPreview.type === "video" ? (
+                  <video
+                    src={selectedFileForPreview.fileUrl!}
+                    controls
+                    autoPlay
+                    className="max-w-full max-h-full"
+                  />
+                ) : selectedFileForPreview.type === "image" ? (
+                  <img
+                    src={selectedFileForPreview.fileUrl!}
+                    alt={selectedFileForPreview.name}
+                    className="max-w-full max-h-full object-contain"
+                  />
+                ) : (
+                  <iframe
+                    src={getDocumentViewerUrl(selectedFileForPreview.fileUrl!, selectedFileForPreview.type)}
+                    className="w-full h-full border-0"
+                    title="File Preview"
+                  />
+                )}
               </div>
             </motion.div>
           </motion.div>
