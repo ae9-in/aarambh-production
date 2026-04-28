@@ -1,10 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  turbopack: {
-    root: ".",
-  },
   experimental: {
-    proxyClientMaxBodySize: 600 * 1024 * 1024,
+    serverActions: {
+      bodySizeLimit: '600mb',
+    },
   },
   typescript: {
     ignoreBuildErrors: true,
