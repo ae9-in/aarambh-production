@@ -122,22 +122,29 @@ export default function FilesPage() {
     }
   }
 
-  const getDocumentViewerUrl = (fileUrl: string, type?: string): string => {
-    const lowerUrl = fileUrl.toLowerCase()
-    const upperType = String(type || "").toUpperCase()
+  const getDocumentViewerUrl = (file: FileItem): string => {
+    if (!file.fileUrl) return ""
+    
+    const lowerUrl = file.fileUrl.toLowerCase()
+    const upperType = String(file.type || "").toUpperCase()
+    const isPdf = upperType === "PDF" || lowerUrl.endsWith(".pdf")
+    
+    // Use the proxy API for all documents to ensure inline headers
+    const proxyUrl = `/api/content/${file.id}/document`
 
-    if (upperType === "PDF" || lowerUrl.endsWith(".pdf")) {
-      return fileUrl
+    if (isPdf) {
+      // Wrap PDF in Google Viewer for absolute guarantee against downloading
+      return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(window.location.origin + proxyUrl)}`
     }
 
     // Office viewer for ppt/pptx/doc/docx/xls/xlsx
     const officeExtensions = [".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx"]
     if (officeExtensions.some((ext) => lowerUrl.includes(ext))) {
-      return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(fileUrl)}`
+      return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(file.fileUrl)}`
     }
 
     // Fallback viewer for other raw docs
-    return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(fileUrl)}`
+    return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(file.fileUrl)}`
   }
 
   const loadData = useCallback(async () => {
@@ -1322,7 +1329,7 @@ export default function FilesPage() {
                   />
                 ) : (
                   <iframe
-                    src={getDocumentViewerUrl(selectedFileForPreview.fileUrl!, selectedFileForPreview.type)}
+                    src={getDocumentViewerUrl(selectedFileForPreview)}
                     className="w-full h-full border-0"
                     title="File Preview"
                   />
