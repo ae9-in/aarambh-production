@@ -129,12 +129,12 @@ export default function FilesPage() {
     const upperType = String(file.type || "").toUpperCase()
     const isPdf = upperType === "PDF" || lowerUrl.endsWith(".pdf")
     
-    // Use the proxy API for all documents to ensure inline headers
+    // Use the proxy API to ensure "inline" viewing (no download)
     const proxyUrl = `/api/content/${file.id}/document`
 
     if (isPdf) {
-      // Wrap PDF in Google Viewer for absolute guarantee against downloading
-      return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(window.location.origin + proxyUrl)}`
+      // Direct iframe to the proxy is the most stable for PDFs
+      return proxyUrl
     }
 
     // Office viewer for ppt/pptx/doc/docx/xls/xlsx
@@ -143,8 +143,8 @@ export default function FilesPage() {
       return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(file.fileUrl)}`
     }
 
-    // Fallback viewer for other raw docs
-    return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(file.fileUrl)}`
+    // Fallback for other documents
+    return proxyUrl
   }
 
   const loadData = useCallback(async () => {
