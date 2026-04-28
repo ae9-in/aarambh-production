@@ -40,21 +40,30 @@ const mapApiCategory = (c: ApiCategory): Category => ({
     typeof c.completion_percent === "number" ? c.completion_percent : 0,
 })
 
-// Add New Category Modal
-function AddCategoryModal({
+// Category Modal (handles both Create and Edit)
+function CategoryModal({
   isOpen,
   onClose,
-  onCreate,
+  onSubmit,
+  initialValues,
+  mode = "create",
 }: {
   isOpen: boolean
   onClose: () => void
-  onCreate: (values: {
+  onSubmit: (values: {
     name: string
     description: string
     color: string
     file: File | null
     imageUrl: string
   }) => Promise<void>
+  initialValues?: {
+    name: string
+    description: string
+    color: string
+    icon: string
+  }
+  mode?: "create" | "edit"
 }) {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -62,6 +71,27 @@ function AddCategoryModal({
   const [file, setFile] = useState<File | null>(null)
   const [imageUrl, setImageUrl] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Update fields when initialValues change
+  useEffect(() => {
+    if (initialValues) {
+      setName(initialValues.name || "")
+      setDescription(initialValues.description || "")
+      setColor(initialValues.color || "#FF6B35")
+      if (initialValues.icon?.startsWith("http")) {
+        setImageUrl(initialValues.icon)
+      } else {
+        setImageUrl("")
+      }
+      setFile(null)
+    } else {
+      setName("")
+      setDescription("")
+      setColor("#FF6B35")
+      setImageUrl("")
+      setFile(null)
+    }
+  }, [initialValues, isOpen])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -72,21 +102,16 @@ function AddCategoryModal({
 
     try {
       setIsSubmitting(true)
-      await onCreate({
+      await onSubmit({
         name: name.trim(),
         description: description.trim(),
         color: color.trim() || "#FF6B35",
         file,
         imageUrl: imageUrl.trim(),
       })
-      setName("")
-      setDescription("")
-      setColor("#FF6B35")
-      setFile(null)
-      setImageUrl("")
       onClose()
     } catch (err: any) {
-      toast.error(err?.message || "Failed to create category")
+      toast.error(err?.message || `Failed to ${mode} category`)
     } finally {
       setIsSubmitting(false)
     }
@@ -104,7 +129,7 @@ function AddCategoryModal({
             transition={{ type: "spring", damping: 30 }}
           >
             <h2 className="text-xl font-bold text-[#1C1917] mb-4">
-              Add New Category
+              {mode === "create" ? "Add New Category" : "Edit Category"}
             </h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -200,12 +225,12 @@ function AddCategoryModal({
                   Cancel
                 </button>
                 <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="flex-1 py-3 rounded-lg bg-[#FF6B35] text-white font-medium hover:bg-[#E55A24] disabled:opacity-50"
-                >
-                  {isSubmitting ? "Creating..." : "Create"}
-                </button>
+                   type="submit"
+                   disabled={isSubmitting}
+                   className="flex-1 py-3 rounded-lg bg-[#FF6B35] text-white font-medium hover:bg-[#E55A24] disabled:opacity-50"
+                 >
+                   {isSubmitting ? (mode === "create" ? "Creating..." : "Saving...") : (mode === "create" ? "Create" : "Save Changes")}
+                 </button>
               </div>
             </form>
           </motion.div>
@@ -221,6 +246,7 @@ export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editCategory, setEditCategory] = useState<Category | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -350,6 +376,63 @@ export default function CategoriesPage() {
     }
 
     toast.success(`Category "${values.name}" created successfully!`)
+  }
+
+  const handleUpdateCategory = async (values: {
+    name: string
+    description: string
+    color: string
+    file: File | null
+    imageUrl: string
+  }) => {
+    if (!editCategory) return
+
+    let iconValue: string | null = editCategory.icon
+
+    // Handle image upload if a new file is provided
+    if (values.file) {
+      try {
+        const formData = new FormData()
+        formData.append("file", values.file)
+        formData.append("orgId", user?.orgId || "")
+
+        const uploadRes = await fetch("/api/upload/category-image", {
+          method: "POST",
+          body: formData,
+        })
+
+        if (!uploadRes.ok) throw new Error("Failed to upload image")
+        const uploadData = await uploadRes.json()
+        iconValue = uploadData.imageUrl
+      } catch (e) {
+        console.error("Upload error:", e)
+        toast.error("Failed to upload banner image")
+      }
+    } else if (values.imageUrl) {
+      iconValue = values.imageUrl
+    }
+
+    const res = await fetch(`/api/categories/${editCategory.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: values.name,
+        description: values.description,
+        color: values.color,
+        icon: iconValue,
+      }),
+    })
+
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.error || "Failed to update category")
+    }
+
+    const data = await res.json()
+    setCategories((prev) =>
+      prev.map((c) => (c.id === editCategory.id ? mapApiCategory(data.category) : c))
+    )
+    toast.success("Category updated successfully")
   }
 
   const filteredCategories = categories.filter((cat) =>
@@ -490,7 +573,7 @@ export default function CategoriesPage() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        toast.info("Edit feature coming soon")
+                        setEditCategory(category)
                       }}
                       className="p-1.5 bg-white/90 backdrop-blur rounded-lg hover:bg-white"
                     >
@@ -572,10 +655,20 @@ export default function CategoriesPage() {
         </motion.div>
       )}
 
-      <AddCategoryModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onCreate={handleCreateCategory}
+      <CategoryModal
+        isOpen={isModalOpen || !!editCategory}
+        mode={editCategory ? "edit" : "create"}
+        initialValues={editCategory ? {
+          name: editCategory.name,
+          description: editCategory.description,
+          color: editCategory.color,
+          icon: editCategory.icon,
+        } : undefined}
+        onClose={() => {
+          setIsModalOpen(false)
+          setEditCategory(null)
+        }}
+        onSubmit={editCategory ? handleUpdateCategory : handleCreateCategory}
       />
     </div>
   )
