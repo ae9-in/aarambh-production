@@ -188,7 +188,7 @@ export default function FilesPage() {
         })),
       )
       
-      if (cats.length > 0 && !uploadFolderId) {
+      if (cats.length > 0 && !uploadFolderId && !selectedFolder) {
         setUploadFolderId(String(cats[0].id))
       }
 
@@ -567,7 +567,10 @@ export default function FilesPage() {
             </div>
 
             <button
-              onClick={() => setSelectedFolder(null)}
+              onClick={() => {
+                setSelectedFolder(null)
+                setUploadFolderId("")
+              }}
               className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors mb-2 ${
                 selectedFolder === null ? "bg-[#FF6B35]/10 text-[#FF6B35]" : "hover:bg-[#F5F5F4] text-[#1C1917]"
               }`}
@@ -599,7 +602,10 @@ export default function FilesPage() {
                 whileHover={{ x: 4 }}
               >
                 <button
-                  onClick={() => setSelectedFolder(folder.name)}
+                  onClick={() => {
+                    setSelectedFolder(folder.name)
+                    setUploadFolderId(folder.id)
+                  }}
                   className="flex items-center gap-3 flex-1 min-w-0"
                 >
                   <div 
@@ -677,7 +683,10 @@ export default function FilesPage() {
           {/* Breadcrumb */}
           <div className="flex items-center gap-2 text-sm mb-4">
             <button 
-              onClick={() => setSelectedFolder(null)}
+              onClick={() => {
+                setSelectedFolder(null)
+                setUploadFolderId("")
+              }}
               className="text-[#78716C] hover:text-[#1C1917] transition-colors"
             >
               All Files
