@@ -188,9 +188,6 @@ export default function FilesPage() {
         })),
       )
       
-      if (cats.length > 0 && !uploadFolderId && !selectedFolder) {
-        setUploadFolderId(String(cats[0].id))
-      }
 
       const contentRows: any[] = contentJson?.content ?? []
       const typeMap: Record<string, FileItem["type"]> = {
@@ -231,6 +228,13 @@ export default function FilesPage() {
       setIsLoading(false)
     }
   }, [user?.id, user?.orgId, user?.role])
+
+  // Set initial upload folder once folders are loaded
+  useEffect(() => {
+    if (folders.length > 0 && !uploadFolderId && !selectedFolder) {
+      setUploadFolderId(folders[0].id)
+    }
+  }, [folders, uploadFolderId, selectedFolder])
 
   useEffect(() => {
     if (!user?.orgId || !user?.id) return
